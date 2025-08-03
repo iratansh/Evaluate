@@ -1,14 +1,14 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 
 const DOMAINS = [
-  'Software Engineering',
-  'Data Science',
-  'AI/ML',
-  'Hardware/ECE',
-  'Robotics'
+  { value: 'software_engineering', label: 'Software Engineering' },
+  { value: 'data_science', label: 'Data Science' },
+  { value: 'ai_ml', label: 'AI/ML' },
+  { value: 'hardware_ece', label: 'Hardware/ECE' },
+  { value: 'robotics', label: 'Robotics' }
 ];
 
 const DIFFICULTIES = [
@@ -25,6 +25,40 @@ export default function InterviewSetup() {
     duration_minutes: 45
   });
   const [loading, setLoading] = useState(false);
+  const [domainTopics, setDomainTopics] = useState<string[]>([]);
+  const [loadingTopics, setLoadingTopics] = useState(false);
+
+  const fetchDomainTopics = async (domain: string) => {
+    if (!domain) {
+      setDomainTopics([]);
+      return;
+    }
+
+    setLoadingTopics(true);
+    try {
+      const response = await fetch(`http://localhost:8000/api/interview/domains/${domain}/topics`);
+      if (response.ok) {
+        const data = await response.json();
+        // Extract section headers from topics
+        const sections = data.topics
+          .map((topic: string) => {
+            const match = topic.match(/Section: ([^\n]+)/);
+            return match ? match[1] : null;
+          })
+          .filter((section: string | null) => section && section.trim() !== '')
+          .slice(0, 6); // Show first 6 sections
+        setDomainTopics(sections);
+      }
+    } catch (error) {
+      console.error('Error fetching domain topics:', error);
+    } finally {
+      setLoadingTopics(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchDomainTopics(formData.domain);
+  }, [formData.domain]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -76,10 +110,10 @@ export default function InterviewSetup() {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   {DOMAINS.map((domain) => (
                     <label
-                      key={domain}
+                      key={domain.value}
                       className={`
                         relative flex items-center p-4 border rounded-lg cursor-pointer
-                        ${formData.domain === domain 
+                        ${formData.domain === domain.value 
                           ? 'border-blue-500 bg-blue-50' 
                           : 'border-gray-300 hover:bg-gray-50'
                         }
@@ -88,16 +122,44 @@ export default function InterviewSetup() {
                       <input
                         type="radio"
                         name="domain"
-                        value={domain}
-                        checked={formData.domain === domain}
+                        value={domain.value}
+                        checked={formData.domain === domain.value}
                         onChange={(e) => setFormData({...formData, domain: e.target.value})}
                         className="sr-only"
                       />
-                      <span className="text-sm font-medium">{domain}</span>
+                      <span className="text-sm font-medium">{domain.label}</span>
                     </label>
                   ))}
                 </div>
               </div>
+
+              {/* Topics Preview */}
+              {formData.domain && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-3">
+                    Topics Covered
+                  </label>
+                  <div className="bg-gray-50 rounded-lg p-4">
+                    {loadingTopics ? (
+                      <div className="flex items-center space-x-2">
+                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-500"></div>
+                        <span className="text-sm text-gray-600">Loading topics...</span>
+                      </div>
+                    ) : domainTopics.length > 0 ? (
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                        {domainTopics.map((topic, index) => (
+                          <div key={index} className="flex items-center space-x-2">
+                            <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
+                            <span className="text-sm text-gray-700">{topic}</span>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <span className="text-sm text-gray-500">Select a domain to see topics</span>
+                    )}
+                  </div>
+                </div>
+              )}
 
               {/* Difficulty Selection */}
               <div>

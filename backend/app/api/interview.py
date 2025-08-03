@@ -16,6 +16,7 @@ from app.models.schemas import (
 from app.models.database import get_db, InterviewSession, InterviewQuestion
 from app.services.llm import llm_service
 from app.services.speech import speech_service, storage_service
+from app.services.rag import rag_service
 
 router = APIRouter()
 
@@ -172,8 +173,40 @@ async def submit_audio_answer(
         # Convert speech to text
         transcribed_text = await speech_service.speech_to_text(audio_data)
         
-        if not transcribed_text:
-            raise HTTPException(status_code=400, detail="Could not transcribe audio")
+        # Check if transcription failed or is empty
+        if not transcribed_text or transcribed_text in [
+            "Speech recognition not available. Please type your answer.",
+            "Could not understand the audio. Please try again.",
+            "Speech recognition was cancelled. Please try again.",
+            "Speech recognition failed. Please type your answer.",
+            "Speech recognition error. Please type your answer."
+        ]:
+            # Return error response instead of evaluating
+            return {
+                "question_id": question_id,
+                "score": 0,
+                "feedback": "No speech detected in the audio. Please ensure you're speaking clearly into the microphone.",
+                "suggestions": [
+                    "Make sure your microphone is working properly",
+                    "Speak clearly and at a normal pace",
+                    "Try recording again or type your answer instead"
+                ],
+                "error": True
+            }
+        
+        # Check if the transcribed text is too short (likely silence)
+        if len(transcribed_text.strip()) < 10:
+            return {
+                "question_id": question_id,
+                "score": 0,
+                "feedback": f"Answer too short: '{transcribed_text}'. Please provide a more detailed response.",
+                "suggestions": [
+                    "Elaborate on your answer with examples",
+                    "Explain your reasoning",
+                    "Consider the key concepts related to the question"
+                ],
+                "error": True
+            }
         
         # Upload audio file
         audio_url = await storage_service.upload_audio(audio_data)
@@ -205,11 +238,10 @@ async def get_question_audio(question_id: int, db: Session = Depends(get_db)):
         audio_data = await speech_service.text_to_speech(question.question_text)
         
         if not audio_data:
-            raise HTTPException(status_code=500, detail="Could not generate speech")
+            # Return a JSON response indicating TTS is not available instead of 500 error
+            return {"error": "Text-to-speech not available", "question_text": question.question_text}
         
         # Return audio as streaming response
-        audio_stream = io.BytesIO(audio_data)
-        
         return StreamingResponse(
             io.BytesIO(audio_data),
             media_type="audio/wav",
@@ -250,3 +282,34 @@ async def complete_session(session_id: int, db: Session = Depends(get_db)):
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error completing session: {str(e)}")
+
+@router.get("/domains/{domain}/topics")
+async def get_domain_topics(domain: str):
+    """Get available topics for a specific domain"""
+    try:
+        # Get relevant context/topics for the domain
+        topics = await rag_service.get_relevant_context(
+            query=f"{domain} interview topics", 
+            domain=domain, 
+            n_results=10
+        )
+        
+        return {
+            "domain": domain,
+            "topics": topics,
+            "total_topics": len(topics)
+        }
+    except Exception as e:
+        return {
+            "domain": domain,
+            "topics": [f"General {domain} interview topics"],
+            "total_topics": 1,
+            "error": str(e)
+        }
+
+@router.get("/sessions/{session_id}/questions")
+async def get_session_questions(session_id: int, db: Session = Depends(get_db)):
+    questions = db.query(InterviewQuestion).filter(
+        InterviewQuestion.session_id == session_id
+    ).all()
+    return questions

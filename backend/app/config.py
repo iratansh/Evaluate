@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     # Database
     DATABASE_URL: str = "sqlite:///./ai_interviewer.db"
     
-    # Azure (to be added later)
+    # Azure Speech & Storage
     AZURE_SPEECH_KEY: Optional[str] = None
     AZURE_SPEECH_REGION: Optional[str] = None
     AZURE_STORAGE_CONNECTION_STRING: Optional[str] = None

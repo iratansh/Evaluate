@@ -1,7 +1,15 @@
-'use client';
+"use client";
 
-import { useState, useEffect, useRef, use } from 'react';
-import { useRouter } from 'next/navigation';
+import { useState, useEffect, useRef } from "react";
+import { useRouter, useParams } from "next/navigation";
+import ProfessionalAvatar from "./avatar";
+
+// Extend Window interface for webkit audio context
+declare global {
+  interface Window {
+    webkitAudioContext: typeof AudioContext;
+  }
+}
 
 interface Question {
   id: number;
@@ -18,98 +26,206 @@ interface Session {
   duration_minutes: number;
 }
 
-export default function InterviewSession({ params }: { params: Promise<{ id: string }> }) {
+export default function InterviewSession() {
   const router = useRouter();
-  const resolvedParams = use(params);
+  const params = useParams();
+  const sessionId = params?.id as string;
+
   const [session, setSession] = useState<Session | null>(null);
   const [currentQuestion, setCurrentQuestion] = useState<Question | null>(null);
-  const [answer, setAnswer] = useState('');
+  const [answer, setAnswer] = useState("");
   const [isRecording, setIsRecording] = useState(false);
-  const [feedback, setFeedback] = useState<{score: number, feedback: string, suggestions?: string[]} | null>(null);
+  const [feedback, setFeedback] = useState<{
+    score: number;
+    feedback: string;
+    suggestions?: string[];
+  } | null>(null);
   const [loading, setLoading] = useState(false);
   const [questionCount, setQuestionCount] = useState(0);
   const [elapsedTime, setElapsedTime] = useState(0);
+  const [error, setError] = useState<string | null>(null);
+
+  // Audio related states
+  const [isPlayingTTS, setIsPlayingTTS] = useState(false);
+  const [audioContext, setAudioContext] = useState<AudioContext | null>(null);
+  const [analyser, setAnalyser] = useState<AnalyserNode | null>(null);
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const startTimeRef = useRef<Date | null>(null);
 
   useEffect(() => {
+    if (!sessionId) {
+      setError("No session ID provided");
+      return;
+    }
+
     const initializeSession = async () => {
       try {
-        const response = await fetch(`http://localhost:8000/api/interview/sessions/${resolvedParams.id}`);
-        if (response.ok) {
-          const sessionData = await response.json();
-          setSession(sessionData);
-          
-          // Get first question
-          const questionResponse = await fetch('http://localhost:8000/api/interview/questions', {
-            method: 'POST',
+        // Fetch session details
+        const response = await fetch(
+          `http://localhost:8000/api/interview/sessions/${sessionId}`
+        );
+        if (!response.ok) {
+          throw new Error("Failed to fetch session");
+        }
+
+        const sessionData = await response.json();
+        setSession(sessionData);
+
+        // Get first question
+        const questionResponse = await fetch(
+          "http://localhost:8000/api/interview/questions",
+          {
+            method: "POST",
             headers: {
-              'Content-Type': 'application/json',
+              "Content-Type": "application/json",
             },
             body: JSON.stringify({
-              session_id: parseInt(resolvedParams.id),
-              context: null
+              session_id: parseInt(sessionId),
+              context: null,
             }),
-          });
-
-          if (questionResponse.ok) {
-            const question = await questionResponse.json();
-            setCurrentQuestion(question);
-            setQuestionCount(1);
-          } else {
-            console.error('Failed to get first question');
           }
-        } else {
-          console.error('Failed to fetch session');
+        );
+
+        if (!questionResponse.ok) {
+          throw new Error("Failed to get first question");
         }
+
+        const question = await questionResponse.json();
+        setCurrentQuestion(question);
+        setQuestionCount(1);
+
+        // Initialize audio context
+        const AudioContextClass =
+          window.AudioContext || window.webkitAudioContext;
+        const ctx = new AudioContextClass();
+        const analyserNode = ctx.createAnalyser();
+        analyserNode.fftSize = 256;
+        setAudioContext(ctx);
+        setAnalyser(analyserNode);
       } catch (error) {
-        console.error('Error initializing session:', error);
+        console.error("Error initializing session:", error);
+        setError(
+          error instanceof Error
+            ? error.message
+            : "Failed to initialize session"
+        );
       }
     };
 
     initializeSession();
-    
-    const startTimeNow = new Date();
-    
-    // Timer
+
+    // Start timer
+    startTimeRef.current = new Date();
     const timer = setInterval(() => {
-      setElapsedTime(Math.floor((Date.now() - startTimeNow.getTime()) / 1000));
+      if (startTimeRef.current) {
+        setElapsedTime(
+          Math.floor((Date.now() - startTimeRef.current.getTime()) / 1000)
+        );
+      }
     }, 1000);
 
     return () => clearInterval(timer);
-  }, [resolvedParams.id]);
+  }, [sessionId]);
+
+  const playQuestionAudio = async () => {
+    if (!currentQuestion || !audioContext || !analyser) return;
+
+    try {
+      setIsPlayingTTS(true);
+
+      // Fetch audio from backend
+      const response = await fetch(
+        `http://localhost:8000/api/interview/questions/${currentQuestion.id}/speech`
+      );
+
+      if (!response.ok) {
+        // Check if it's a JSON response indicating TTS is not available
+        try {
+          const errorData = await response.json();
+          if (errorData.error) {
+            console.log("TTS not available:", errorData.error);
+            setIsPlayingTTS(false);
+            return;
+          }
+        } catch {
+          // Not JSON, continue with original error handling
+        }
+        throw new Error("Failed to get audio");
+      }
+
+      const contentType = response.headers.get("content-type");
+
+      // Check if response is JSON (error case)
+      if (contentType?.includes("application/json")) {
+        const errorData = await response.json();
+        console.log("TTS not available:", errorData.error);
+        setIsPlayingTTS(false);
+        return;
+      }
+
+      const audioBlob = await response.blob();
+      const audioUrl = URL.createObjectURL(audioBlob);
+
+      // Create and play audio
+      const audio = new Audio(audioUrl);
+      audioRef.current = audio;
+
+      // Connect to analyser
+      const source = audioContext.createMediaElementSource(audio);
+      source.connect(analyser);
+      analyser.connect(audioContext.destination);
+
+      audio.onended = () => {
+        setIsPlayingTTS(false);
+        URL.revokeObjectURL(audioUrl);
+      };
+
+      await audio.play();
+    } catch (error) {
+      console.error("Error playing audio:", error);
+      setIsPlayingTTS(false);
+    }
+  };
 
   const getNextQuestion = async () => {
-    if (!session) {
-      console.error('No session available');
+    if (!session || !sessionId) {
+      console.error("No session available");
       return;
     }
-    
+
     setLoading(true);
     try {
-      const response = await fetch('http://localhost:8000/api/interview/questions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          session_id: parseInt(resolvedParams.id),
-          context: currentQuestion ? `Previous question: ${currentQuestion.question_text}` : null
-        }),
-      });
+      const response = await fetch(
+        "http://localhost:8000/api/interview/questions",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            session_id: parseInt(sessionId),
+            context: currentQuestion
+              ? `Previous question: ${currentQuestion.question_text}`
+              : null,
+          }),
+        }
+      );
 
-      if (response.ok) {
-        const question = await response.json();
-        setCurrentQuestion(question);
-        setAnswer('');
-        setFeedback(null);
-        setQuestionCount(prev => prev + 1);
-      } else {
-        console.error('Failed to get next question');
+      if (!response.ok) {
+        throw new Error("Failed to get next question");
       }
+
+      const question = await response.json();
+      setCurrentQuestion(question);
+      setAnswer("");
+      setFeedback(null);
+      setQuestionCount((prev) => prev + 1);
     } catch (error) {
-      console.error('Error getting next question:', error);
+      console.error("Error getting next question:", error);
+      setError("Failed to get next question");
     } finally {
       setLoading(false);
     }
@@ -120,23 +236,29 @@ export default function InterviewSession({ params }: { params: Promise<{ id: str
 
     setLoading(true);
     try {
-      const response = await fetch(`http://localhost:8000/api/interview/questions/${currentQuestion.id}/answer`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          question_id: currentQuestion.id,
-          answer_text: answer
-        }),
-      });
+      const response = await fetch(
+        `http://localhost:8000/api/interview/questions/${currentQuestion.id}/answer`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            question_id: currentQuestion.id,
+            answer_text: answer,
+          }),
+        }
+      );
 
-      if (response.ok) {
-        const feedbackData = await response.json();
-        setFeedback(feedbackData);
+      if (!response.ok) {
+        throw new Error("Failed to submit answer");
       }
+
+      const feedbackData = await response.json();
+      setFeedback(feedbackData);
     } catch (error) {
-      console.error('Error submitting answer:', error);
+      console.error("Error submitting answer:", error);
+      setError("Failed to submit answer");
     } finally {
       setLoading(false);
     }
@@ -154,21 +276,32 @@ export default function InterviewSession({ params }: { params: Promise<{ id: str
       };
 
       mediaRecorder.onstop = async () => {
-        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/wav' });
+        const audioBlob = new Blob(audioChunksRef.current, {
+          type: "audio/wav",
+        });
         await submitAudioAnswer(audioBlob);
       };
 
       mediaRecorder.start();
       setIsRecording(true);
     } catch (error) {
-      console.error('Error starting recording:', error);
+      console.error("Error starting recording:", error);
+      setError("Failed to access microphone");
     }
   };
 
   const stopRecording = () => {
-    if (mediaRecorderRef.current) {
+    if (
+      mediaRecorderRef.current &&
+      mediaRecorderRef.current.state !== "inactive"
+    ) {
       mediaRecorderRef.current.stop();
       setIsRecording(false);
+
+      // Stop all tracks
+      mediaRecorderRef.current.stream
+        .getTracks()
+        .forEach((track) => track.stop());
     }
   };
 
@@ -176,52 +309,111 @@ export default function InterviewSession({ params }: { params: Promise<{ id: str
     if (!currentQuestion) return;
 
     const formData = new FormData();
-    formData.append('audio_file', audioBlob, 'answer.wav');
+    formData.append("audio_file", audioBlob, "answer.wav");
 
     setLoading(true);
     try {
-      const response = await fetch(`http://localhost:8000/api/interview/questions/${currentQuestion.id}/audio`, {
-        method: 'POST',
-        body: formData,
-      });
+      const response = await fetch(
+        `http://localhost:8000/api/interview/questions/${currentQuestion.id}/audio`,
+        {
+          method: "POST",
+          body: formData,
+        }
+      );
 
-      if (response.ok) {
-        const feedbackData = await response.json();
+      if (!response.ok) {
+        throw new Error("Failed to submit audio");
+      }
+
+      const feedbackData = await response.json();
+
+      // Check if it's an error response
+      if (feedbackData.error) {
+        // Show error as a temporary alert
+        setError(feedbackData.feedback);
+        // Clear error after 5 seconds
+        setTimeout(() => setError(null), 5000);
+      } else {
+        // Normal feedback
         setFeedback(feedbackData);
       }
     } catch (error) {
-      console.error('Error submitting audio answer:', error);
+      console.error("Error submitting audio answer:", error);
+      setError(
+        "Failed to process audio. Please try again or type your answer."
+      );
+      setTimeout(() => setError(null), 5000);
     } finally {
       setLoading(false);
     }
   };
 
   const completeInterview = async () => {
-    try {
-      const response = await fetch(`http://localhost:8000/api/interview/sessions/${resolvedParams.id}/complete`, {
-        method: 'PUT',
-      });
+    if (!sessionId) return;
 
-      if (response.ok) {
-        router.push(`/interview/results/${resolvedParams.id}`);
+    try {
+      const response = await fetch(
+        `http://localhost:8000/api/interview/sessions/${sessionId}/complete`,
+        {
+          method: "PUT",
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error("Failed to complete interview");
       }
+
+      router.push(`/interview/results/${sessionId}`);
     } catch (error) {
-      console.error('Error completing interview:', error);
+      console.error("Error completing interview:", error);
+      setError("Failed to complete interview");
     }
   };
 
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
+    return `${mins}:${secs.toString().padStart(2, "0")}`;
   };
+
+  if (error) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="text-center p-8 bg-white rounded-lg shadow-lg">
+          <div className="text-red-600 mb-4">
+            <svg
+              className="w-16 h-16 mx-auto"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+              />
+            </svg>
+          </div>
+          <h2 className="text-xl font-semibold text-gray-900 mb-2">Error</h2>
+          <p className="text-gray-600 mb-4">{error}</p>
+          <button
+            onClick={() => router.push("/interview/setup")}
+            className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+          >
+            Back to Setup
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   if (!session || !currentQuestion) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
-          <p>Loading interview...</p>
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p className="text-gray-600">Loading interview...</p>
         </div>
       </div>
     );
@@ -234,11 +426,13 @@ export default function InterviewSession({ params }: { params: Promise<{ id: str
         <div className="container mx-auto px-4 py-4">
           <div className="flex justify-between items-center">
             <div>
-              <h1 className="text-xl font-semibold">{session.domain} Interview</h1>
+              <h1 className="text-xl font-semibold text-gray-900">
+                {session.domain} Interview
+              </h1>
               <p className="text-sm text-gray-600">Question {questionCount}</p>
             </div>
             <div className="text-right">
-              <div className="text-lg font-mono">{formatTime(elapsedTime)}</div>
+              <div className="text-lg font-mono text-gray-900">{formatTime(elapsedTime)}</div>
               <div className="text-sm text-gray-600">
                 {session.duration_minutes} min session
               </div>
@@ -249,6 +443,27 @@ export default function InterviewSession({ params }: { params: Promise<{ id: str
 
       <div className="container mx-auto px-4 py-8">
         <div className="max-w-4xl mx-auto">
+          {/* Avatar Section */}
+          <div className="bg-white rounded-lg shadow-sm p-6 mb-6">
+            <ProfessionalAvatar
+              isPlaying={isPlayingTTS}
+              analyser={analyser}
+            />
+            <div className="text-center mt-4">
+              <button
+                onClick={playQuestionAudio}
+                disabled={isPlayingTTS}
+                className={`px-4 py-2 rounded-lg text-sm ${
+                  isPlayingTTS
+                    ? "bg-gray-300 text-gray-500 cursor-not-allowed"
+                    : "bg-blue-600 text-white hover:bg-blue-700"
+                }`}
+              >
+                {isPlayingTTS ? "Playing..." : "Play Question"}
+              </button>
+            </div>
+          </div>
+
           {/* Question */}
           <div className="bg-white rounded-lg shadow-sm p-6 mb-6">
             <div className="flex items-center mb-4">
@@ -256,7 +471,7 @@ export default function InterviewSession({ params }: { params: Promise<{ id: str
                 {currentQuestion.question_type}
               </span>
             </div>
-            <h2 className="text-xl font-semibold mb-4">
+            <h2 className="text-xl font-semibold text-gray-900 mb-4">
               {currentQuestion.question_text}
             </h2>
           </div>
@@ -274,7 +489,7 @@ export default function InterviewSession({ params }: { params: Promise<{ id: str
                     onChange={(e) => setAnswer(e.target.value)}
                     placeholder="Type your answer here..."
                     rows={6}
-                    className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-900 placeholder-gray-400"
                   />
                 </div>
 
@@ -284,18 +499,19 @@ export default function InterviewSession({ params }: { params: Promise<{ id: str
                     disabled={!answer.trim() || loading}
                     className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-300"
                   >
-                    {loading ? 'Submitting...' : 'Submit Answer'}
+                    {loading ? "Submitting..." : "Submit Answer"}
                   </button>
 
                   <button
                     onClick={isRecording ? stopRecording : startRecording}
+                    disabled={loading}
                     className={`px-6 py-2 rounded-lg ${
-                      isRecording 
-                        ? 'bg-red-600 text-white hover:bg-red-700' 
-                        : 'bg-gray-600 text-white hover:bg-gray-700'
-                    }`}
+                      isRecording
+                        ? "bg-red-600 text-white hover:bg-red-700"
+                        : "bg-gray-600 text-white hover:bg-gray-700"
+                    } disabled:bg-gray-300`}
                   >
-                    {isRecording ? '⏹ Stop Recording' : '🎤 Record Answer'}
+                    {isRecording ? "⏹ Stop Recording" : "🎤 Record Answer"}
                   </button>
                 </div>
               </div>
@@ -305,17 +521,19 @@ export default function InterviewSession({ params }: { params: Promise<{ id: str
           {/* Feedback */}
           {feedback && (
             <div className="bg-white rounded-lg shadow-sm p-6 mb-6">
-              <h3 className="text-lg font-semibold mb-4">Feedback</h3>
-              
+              <h3 className="text-lg font-semibold text-gray-900 mb-4">Feedback</h3>
+
               <div className="mb-4">
                 <div className="flex items-center mb-2">
-                  <span className="text-sm font-medium text-gray-700">Score:</span>
+                  <span className="text-sm font-medium text-gray-700">
+                    Score:
+                  </span>
                   <span className="ml-2 text-lg font-bold text-blue-600">
                     {feedback.score}/10
                   </span>
                 </div>
                 <div className="w-full bg-gray-200 rounded-full h-2">
-                  <div 
+                  <div
                     className="bg-blue-600 h-2 rounded-full"
                     style={{ width: `${(feedback.score / 10) * 100}%` }}
                   ></div>
@@ -329,11 +547,15 @@ export default function InterviewSession({ params }: { params: Promise<{ id: str
 
               {feedback.suggestions && feedback.suggestions.length > 0 && (
                 <div className="mb-6">
-                  <h4 className="font-medium text-gray-700 mb-2">Suggestions:</h4>
+                  <h4 className="font-medium text-gray-700 mb-2">
+                    Suggestions for Improvement:
+                  </h4>
                   <ul className="list-disc list-inside text-gray-600 space-y-1">
-                    {feedback.suggestions.map((suggestion: string, index: number) => (
-                      <li key={index}>{suggestion}</li>
-                    ))}
+                    {feedback.suggestions.map(
+                      (suggestion: string, index: number) => (
+                        <li key={index}>{suggestion}</li>
+                      )
+                    )}
                   </ul>
                 </div>
               )}
@@ -341,11 +563,12 @@ export default function InterviewSession({ params }: { params: Promise<{ id: str
               <div className="flex space-x-4">
                 <button
                   onClick={getNextQuestion}
-                  className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                  disabled={loading}
+                  className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-300"
                 >
                   Next Question
                 </button>
-                
+
                 <button
                   onClick={completeInterview}
                   className="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"

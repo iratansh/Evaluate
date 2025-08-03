@@ -2,6 +2,7 @@ import os
 import httpx
 from typing import List, Dict, Optional
 from app.config import settings
+from app.services.rag import rag_service
 
 class LLMService:
     def __init__(self):
@@ -10,63 +11,35 @@ class LLMService:
         self.client = httpx.AsyncClient(timeout=60.0)
     
     async def generate_question(self, domain: str, difficulty: str, context: str = None) -> Dict:
-        """Generate interview question based on domain and difficulty"""
-        prompt = f"""
-        You are an expert interviewer for {domain} positions.
-        Generate a {difficulty} level interview question.
-        
-        Domain: {domain}
-        Difficulty: {difficulty}
-        
-        Context from previous questions: {context or "This is the first question"}
-        
-        Provide a well-structured question that tests both theoretical knowledge and practical application.
-        Make it engaging and relevant to current industry practices.
-        
-        Format your response as:
-        Question: [Your question here]
-        Type: [technical/behavioral/coding]
-        Expected_concepts: [key concepts the answer should cover]
-        """
+        """Generate interview question based on domain and difficulty using RAG"""
+        # Get enhanced prompt with topic-specific context
+        prompt = await rag_service.enhance_question_prompt(domain, difficulty, context)
         
         try:
             response = await self._call_ollama(prompt)
-            return self._parse_question_response(response)
+            parsed_response = self._parse_question_response(response)
+            
+            # If parsing failed or returned None, use fallback
+            if not parsed_response or not parsed_response.get("question_text"):
+                return self._get_fallback_question(domain, difficulty)
+            
+            return parsed_response
         except Exception as e:
             print(f"Error generating question: {e}")
             return self._get_fallback_question(domain, difficulty)
     
     async def evaluate_answer(self, question: str, answer: str, domain: str) -> Dict:
-        """Evaluate user's answer and provide feedback"""
-        prompt = f"""
-        As an expert interviewer for {domain}, evaluate this answer:
-        
-        Question: {question}
-        Answer: {answer}
-        
-        Provide:
-        1. Score (0-10)
-        2. Strengths in the answer
-        3. Areas for improvement
-        4. Suggestions for better answers
-        
-        Format:
-        Score: [0-10]
-        Strengths: [list strengths]
-        Improvements: [areas to improve]
-        Suggestions: [specific suggestions]
-        """
+        """Evaluate user's answer and provide feedback using RAG"""
+        # Get enhanced prompt with domain-specific context
+        prompt = await rag_service.enhance_evaluation_prompt(question, answer, domain)
         
         try:
             response = await self._call_ollama(prompt)
-            return self._parse_evaluation_response(response)
+            return self._parse_evaluation_response(response, question, answer, domain)
         except Exception as e:
             print(f"Error evaluating answer: {e}")
-            return {
-                "score": 5.0,
-                "feedback": "Unable to evaluate answer at this time.",
-                "suggestions": ["Please try again later."]
-            }
+            # Return a more detailed fallback evaluation
+            return self._get_fallback_evaluation(question, answer, domain)
     
     async def _call_ollama(self, prompt: str) -> str:
         """Make API call to Ollama"""
@@ -90,13 +63,18 @@ class LLMService:
     
     def _parse_question_response(self, response: str) -> Dict:
         """Parse LLM response for question generation"""
+        # If Ollama is not available, return None to trigger fallback
+        if response == "Ollama not available" or response == "Error generating response":
+            return None
+        
         lines = response.split('\n')
         result = {
-            "question_text": "What are the key principles of good software design?",
+            "question_text": None,
             "question_type": "technical",
-            "expected_concepts": ["SOLID principles", "Design patterns", "Clean code"]
+            "expected_concepts": ["Domain knowledge", "Problem solving"]
         }
         
+        # Try to extract question from LLM response
         for line in lines:
             if line.startswith("Question:"):
                 result["question_text"] = line.replace("Question:", "").strip()
@@ -106,31 +84,247 @@ class LLMService:
                 concepts = line.replace("Expected_concepts:", "").strip()
                 result["expected_concepts"] = [c.strip() for c in concepts.split(",")]
         
+        # If we couldn't extract a proper question, try to use the whole response
+        if not result["question_text"] and response.strip():
+            # Clean up the response and use it as the question
+            clean_response = response.strip()
+            # Remove common LLM prefixes
+            prefixes_to_remove = ["Question:", "Q:", "Interview Question:", "Technical Question:"]
+            for prefix in prefixes_to_remove:
+                if clean_response.startswith(prefix):
+                    clean_response = clean_response[len(prefix):].strip()
+            
+            if len(clean_response) > 10:  # Make sure it's a reasonable question
+                result["question_text"] = clean_response
+        
         return result
     
-    def _parse_evaluation_response(self, response: str) -> Dict:
-        """Parse LLM response for answer evaluation"""
+    def _parse_evaluation_response(self, response: str, question: str, answer: str, domain: str) -> Dict:
+        """Parse LLM response for answer evaluation with better parsing"""
+        if response == "Ollama not available" or response == "Error generating response":
+            return self._get_fallback_evaluation(question, answer, domain)
+        
         lines = response.split('\n')
         result = {
             "score": 5.0,
-            "feedback": "Answer evaluated.",
-            "suggestions": ["Keep practicing!"]
+            "feedback": "",
+            "suggestions": []
         }
         
+        # Track which section we're in
+        current_section = None
+        
         for line in lines:
+            line = line.strip()
+            
+            # Identify sections
             if line.startswith("Score:"):
+                current_section = "score"
                 try:
                     score_text = line.replace("Score:", "").strip()
-                    result["score"] = float(score_text.split()[0])
+                    # Extract numeric score (handle "7/10" or just "7")
+                    if "/" in score_text:
+                        score_num = score_text.split("/")[0].strip()
+                    else:
+                        score_num = score_text.split()[0]
+                    result["score"] = float(score_num)
                 except:
                     result["score"] = 5.0
-            elif line.startswith("Strengths:"):
-                result["feedback"] = line.replace("Strengths:", "").strip()
-            elif line.startswith("Suggestions:"):
-                suggestions = line.replace("Suggestions:", "").strip()
-                result["suggestions"] = [s.strip() for s in suggestions.split(",")]
+            
+            elif any(line.startswith(prefix) for prefix in ["Strengths:", "Feedback:", "Evaluation:"]):
+                current_section = "strengths"
+                # Extract the content after the prefix
+                for prefix in ["Strengths:", "Feedback:", "Evaluation:"]:
+                    if line.startswith(prefix):
+                        content = line.replace(prefix, "").strip()
+                        if content:
+                            result["feedback"] = content
+                        break
+            
+            elif any(line.startswith(prefix) for prefix in ["Improvements:", "Areas for Improvement:", "Weaknesses:"]):
+                current_section = "improvements"
+                # Add improvements to feedback
+                for prefix in ["Improvements:", "Areas for Improvement:", "Weaknesses:"]:
+                    if line.startswith(prefix):
+                        content = line.replace(prefix, "").strip()
+                        if content and result["feedback"]:
+                            result["feedback"] += f"\n\nAreas for improvement: {content}"
+                        elif content:
+                            result["feedback"] = f"Areas for improvement: {content}"
+                        break
+            
+            elif any(line.startswith(prefix) for prefix in ["Suggestions:", "Recommendations:", "Next Steps:"]):
+                current_section = "suggestions"
+                # Extract suggestions
+                for prefix in ["Suggestions:", "Recommendations:", "Next Steps:"]:
+                    if line.startswith(prefix):
+                        content = line.replace(prefix, "").strip()
+                        if content:
+                            # Split by common delimiters
+                            if "," in content:
+                                result["suggestions"] = [s.strip() for s in content.split(",")]
+                            elif ";" in content:
+                                result["suggestions"] = [s.strip() for s in content.split(";")]
+                            else:
+                                result["suggestions"] = [content]
+                        break
+            
+            # Continue adding content to current section
+            elif current_section and line and not any(line.startswith(p + ":") for p in ["Score", "Strengths", "Feedback", "Improvements", "Suggestions"]):
+                if current_section == "strengths" and line:
+                    if result["feedback"]:
+                        result["feedback"] += f" {line}"
+                    else:
+                        result["feedback"] = line
+                elif current_section == "improvements" and line:
+                    result["feedback"] += f" {line}"
+                elif current_section == "suggestions" and line:
+                    # Handle bullet points or numbered lists
+                    if line.startswith(("- ", "* ", "• ")) or (len(line) > 2 and line[0].isdigit() and line[1] in ".)"):
+                        suggestion = line.lstrip("- *•0123456789.)")
+                        result["suggestions"].append(suggestion.strip())
+        
+        # If we didn't parse anything meaningful, provide a basic evaluation
+        if not result["feedback"] or result["feedback"] == "Answer evaluated.":
+            length_score = min(9, max(4, len(answer.split()) / 8))  # More generous length-based scoring
+            result["score"] = length_score
+            
+            if len(answer.split()) < 15:
+                result["feedback"] = "Your answer demonstrates understanding but could benefit from more detailed explanations and specific examples."
+                result["suggestions"] = [
+                    "Provide more detailed explanations of key concepts",
+                    "Include specific examples or use cases",
+                    "Discuss relevant technical approaches or methodologies"
+                ]
+            elif len(answer.split()) > 100:
+                result["feedback"] = "You provided a very comprehensive answer with excellent detail. Your thorough approach shows strong understanding."
+                result["suggestions"] = [
+                    "Consider organizing complex responses with clear structure",
+                    "Focus on the most critical aspects first",
+                    "Practice concise summaries of key points"
+                ]
+            else:
+                result["feedback"] = "Solid answer that demonstrates good understanding. You covered the important concepts well."
+                result["suggestions"] = [
+                    "Include more technical terminology specific to " + domain,
+                    "Provide concrete examples to reinforce your points",
+                    "Consider discussing trade-offs or alternative approaches"
+                ]
+        
+        # Ensure we always have suggestions
+        if not result["suggestions"]:
+            result["suggestions"] = self._get_domain_specific_suggestions(domain)
         
         return result
+    
+    def _get_fallback_evaluation(self, question: str, answer: str, domain: str) -> Dict:
+        """Provide a meaningful fallback evaluation when LLM is unavailable"""
+        # Basic scoring based on answer length and keywords
+        answer_length = len(answer.split())
+        
+        # More generous scoring logic
+        if answer_length < 5:
+            score = 2.0
+            feedback = "Your answer is too brief. Technical interviews require detailed explanations with specific examples."
+        elif answer_length < 15:
+            score = 4.0
+            feedback = "Your answer covers some basics but needs more detail. Try to explain the reasoning behind your approach."
+        elif answer_length < 40:
+            score = 6.5
+            feedback = "Good answer with reasonable detail. Consider adding specific examples or discussing alternative approaches."
+        elif answer_length < 80:
+            score = 7.5
+            feedback = "Well-structured answer with good detail. You demonstrated solid understanding of the concepts."
+        else:
+            score = 8.0
+            feedback = "Comprehensive answer with excellent detail. You showed deep understanding and considered multiple aspects."
+        
+        # Boost score for domain-specific keywords
+        domain_keywords = self._get_domain_keywords(domain)
+        keyword_matches = sum(1 for keyword in domain_keywords if keyword.lower() in answer.lower())
+        
+        if keyword_matches > 0:
+            # Boost score by up to 1.5 points for relevant keywords
+            keyword_boost = min(1.5, keyword_matches * 0.3)
+            score = min(9.5, score + keyword_boost)
+            feedback += f" Great use of {keyword_matches} relevant technical term{'s' if keyword_matches > 1 else ''}."
+        
+        # Domain-specific suggestions
+        suggestions = self._get_domain_specific_suggestions(domain)
+        
+        return {
+            "score": score,
+            "feedback": feedback,
+            "suggestions": suggestions
+        }
+    
+    def _get_domain_keywords(self, domain: str) -> List[str]:
+        """Get relevant technical keywords for each domain"""
+        keywords_map = {
+            "Software Engineering": [
+                "algorithm", "complexity", "scalability", "design pattern", "OOP", "SOLID", 
+                "database", "API", "REST", "microservices", "testing", "debugging", "optimization",
+                "data structure", "array", "linked list", "tree", "graph", "hash", "performance"
+            ],
+            "Data Science": [
+                "statistics", "probability", "regression", "classification", "clustering", "model",
+                "feature", "dataset", "correlation", "variance", "bias", "validation", "cross-validation",
+                "pandas", "numpy", "matplotlib", "sklearn", "analysis", "hypothesis", "p-value"
+            ],
+            "AI/ML": [
+                "neural network", "deep learning", "gradient", "backpropagation", "overfitting",
+                "regularization", "CNN", "RNN", "transformer", "attention", "training", "inference",
+                "supervised", "unsupervised", "reinforcement", "algorithm", "optimization", "loss function"
+            ],
+            "Hardware/ECE": [
+                "circuit", "voltage", "current", "resistance", "capacitor", "inductor", "transistor",
+                "amplifier", "digital", "analog", "microcontroller", "FPGA", "PCB", "signal", "power",
+                "frequency", "impedance", "oscilloscope", "multimeter", "semiconductor"
+            ],
+            "Robotics": [
+                "sensor", "actuator", "control", "PID", "kinematics", "dynamics", "path planning",
+                "localization", "mapping", "SLAM", "computer vision", "feedback", "servo", "motor",
+                "encoder", "IMU", "lidar", "camera", "autonomous", "navigation"
+            ]
+        }
+        
+        return keywords_map.get(domain, [])
+    
+    def _get_domain_specific_suggestions(self, domain: str) -> List[str]:
+        """Get domain-specific improvement suggestions"""
+        suggestions_map = {
+            "Software Engineering": [
+                "Discuss time and space complexity when relevant",
+                "Consider scalability and maintainability",
+                "Include specific design patterns or principles"
+            ],
+            "Data Science": [
+                "Mention relevant statistical concepts",
+                "Discuss data preprocessing and validation",
+                "Consider model evaluation metrics"
+            ],
+            "AI/ML": [
+                "Explain the mathematical intuition behind algorithms",
+                "Discuss model architecture choices",
+                "Consider training and inference optimization"
+            ],
+            "Hardware/ECE": [
+                "Include circuit analysis or component specifications",
+                "Discuss power consumption and efficiency",
+                "Consider real-world constraints and tolerances"
+            ],
+            "Robotics": [
+                "Discuss sensor fusion and perception",
+                "Consider real-time constraints",
+                "Include control theory concepts when relevant"
+            ]
+        }
+        
+        return suggestions_map.get(domain, [
+            "Provide more specific technical details",
+            "Include examples from real-world applications",
+            "Structure your answer clearly"
+        ])
     
     def _get_fallback_question(self, domain: str, difficulty: str) -> Dict:
         """Fallback questions when LLM is unavailable"""
