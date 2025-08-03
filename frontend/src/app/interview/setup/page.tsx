@@ -127,7 +127,7 @@ export default function InterviewSetup() {
                         onChange={(e) => setFormData({...formData, domain: e.target.value})}
                         className="sr-only"
                       />
-                      <span className="text-sm font-medium">{domain.label}</span>
+                      <span className="text-sm font-medium text-gray-900">{domain.label}</span>
                     </label>
                   ))}
                 </div>
@@ -187,7 +187,7 @@ export default function InterviewSetup() {
                         className="sr-only"
                       />
                       <div>
-                        <div className="text-sm font-medium">{diff.label}</div>
+                        <div className="text-sm font-medium text-gray-900">{diff.label}</div>
                         <div className="text-xs text-gray-500">{diff.description}</div>
                       </div>
                     </label>

@@ -221,18 +221,26 @@ class LLMService:
         """Provide a meaningful fallback evaluation when LLM is unavailable"""
         # Basic scoring based on answer length and keywords
         answer_length = len(answer.split())
+        answer_lower = answer.lower().strip()
         
-        # More generous scoring logic
-        if answer_length < 5:
-            score = 2.0
-            feedback = "Your answer is too brief. Technical interviews require detailed explanations with specific examples."
-        elif answer_length < 15:
+        # Check for non-answers or very poor responses
+        non_answers = ['i don\'t know', 'no idea', 'not sure', 'don\'t know', 'idk', 'dunno', 'no clue', 'unsure']
+        if any(non_answer in answer_lower for non_answer in non_answers):
+            score = 0.5
+            feedback = "Not knowing the answer is understandable, but in interviews you should try to demonstrate your thought process or mention related concepts."
+        elif answer_length < 3:
+            score = 1.0
+            feedback = "Your answer is extremely brief. Technical interviews require detailed explanations with specific examples and reasoning."
+        elif answer_length < 8:
+            score = 2.5
+            feedback = "Your answer is too brief. Try to explain your reasoning, provide examples, and demonstrate your understanding."
+        elif answer_length < 20:
             score = 4.0
-            feedback = "Your answer covers some basics but needs more detail. Try to explain the reasoning behind your approach."
-        elif answer_length < 40:
-            score = 6.5
-            feedback = "Good answer with reasonable detail. Consider adding specific examples or discussing alternative approaches."
-        elif answer_length < 80:
+            feedback = "Your answer covers some basics but needs more detail. Explain the reasoning behind your approach and provide specific examples."
+        elif answer_length < 50:
+            score = 6.0
+            feedback = "Good answer with reasonable detail. Consider adding specific examples, discussing trade-offs, or alternative approaches."
+        elif answer_length < 100:
             score = 7.5
             feedback = "Well-structured answer with good detail. You demonstrated solid understanding of the concepts."
         else:
@@ -261,25 +269,51 @@ class LLMService:
     def _get_domain_keywords(self, domain: str) -> List[str]:
         """Get relevant technical keywords for each domain"""
         keywords_map = {
+            # Handle both underscore format and full names
+            "software_engineering": [
+                "algorithm", "complexity", "scalability", "design pattern", "OOP", "SOLID", 
+                "database", "API", "REST", "microservices", "testing", "debugging", "optimization",
+                "data structure", "array", "linked list", "tree", "graph", "hash", "performance"
+            ],
             "Software Engineering": [
                 "algorithm", "complexity", "scalability", "design pattern", "OOP", "SOLID", 
                 "database", "API", "REST", "microservices", "testing", "debugging", "optimization",
                 "data structure", "array", "linked list", "tree", "graph", "hash", "performance"
+            ],
+            "data_science": [
+                "statistics", "probability", "regression", "classification", "clustering", "model",
+                "feature", "dataset", "correlation", "variance", "bias", "validation", "cross-validation",
+                "pandas", "numpy", "matplotlib", "sklearn", "analysis", "hypothesis", "p-value"
             ],
             "Data Science": [
                 "statistics", "probability", "regression", "classification", "clustering", "model",
                 "feature", "dataset", "correlation", "variance", "bias", "validation", "cross-validation",
                 "pandas", "numpy", "matplotlib", "sklearn", "analysis", "hypothesis", "p-value"
             ],
+            "ai_ml": [
+                "neural network", "deep learning", "gradient", "backpropagation", "overfitting",
+                "regularization", "CNN", "RNN", "transformer", "attention", "training", "inference",
+                "supervised", "unsupervised", "reinforcement", "algorithm", "optimization", "loss function"
+            ],
             "AI/ML": [
                 "neural network", "deep learning", "gradient", "backpropagation", "overfitting",
                 "regularization", "CNN", "RNN", "transformer", "attention", "training", "inference",
                 "supervised", "unsupervised", "reinforcement", "algorithm", "optimization", "loss function"
             ],
+            "hardware_ece": [
+                "circuit", "voltage", "current", "resistance", "capacitor", "inductor", "transistor",
+                "amplifier", "digital", "analog", "microcontroller", "FPGA", "PCB", "signal", "power",
+                "frequency", "impedance", "oscilloscope", "multimeter", "semiconductor"
+            ],
             "Hardware/ECE": [
                 "circuit", "voltage", "current", "resistance", "capacitor", "inductor", "transistor",
                 "amplifier", "digital", "analog", "microcontroller", "FPGA", "PCB", "signal", "power",
                 "frequency", "impedance", "oscilloscope", "multimeter", "semiconductor"
+            ],
+            "robotics": [
+                "sensor", "actuator", "control", "PID", "kinematics", "dynamics", "path planning",
+                "localization", "mapping", "SLAM", "computer vision", "feedback", "servo", "motor",
+                "encoder", "IMU", "lidar", "camera", "autonomous", "navigation"
             ],
             "Robotics": [
                 "sensor", "actuator", "control", "PID", "kinematics", "dynamics", "path planning",
@@ -293,25 +327,51 @@ class LLMService:
     def _get_domain_specific_suggestions(self, domain: str) -> List[str]:
         """Get domain-specific improvement suggestions"""
         suggestions_map = {
+            # Handle both underscore format and full names
+            "software_engineering": [
+                "Discuss time and space complexity when relevant",
+                "Consider scalability and maintainability",
+                "Include specific design patterns or principles"
+            ],
             "Software Engineering": [
                 "Discuss time and space complexity when relevant",
                 "Consider scalability and maintainability",
                 "Include specific design patterns or principles"
+            ],
+            "data_science": [
+                "Mention relevant statistical concepts",
+                "Discuss data preprocessing and validation",
+                "Consider model evaluation metrics"
             ],
             "Data Science": [
                 "Mention relevant statistical concepts",
                 "Discuss data preprocessing and validation",
                 "Consider model evaluation metrics"
             ],
+            "ai_ml": [
+                "Explain the mathematical intuition behind algorithms",
+                "Discuss model architecture choices",
+                "Consider training and inference optimization"
+            ],
             "AI/ML": [
                 "Explain the mathematical intuition behind algorithms",
                 "Discuss model architecture choices",
                 "Consider training and inference optimization"
             ],
+            "hardware_ece": [
+                "Include circuit analysis or component specifications",
+                "Discuss power consumption and efficiency",
+                "Consider real-world constraints and tolerances"
+            ],
             "Hardware/ECE": [
                 "Include circuit analysis or component specifications",
                 "Discuss power consumption and efficiency",
                 "Consider real-world constraints and tolerances"
+            ],
+            "robotics": [
+                "Discuss sensor fusion and perception",
+                "Consider real-time constraints",
+                "Include control theory concepts when relevant"
             ],
             "Robotics": [
                 "Discuss sensor fusion and perception",
@@ -319,7 +379,7 @@ class LLMService:
                 "Include control theory concepts when relevant"
             ]
         }
-        
+
         return suggestions_map.get(domain, [
             "Provide more specific technical details",
             "Include examples from real-world applications",
@@ -329,25 +389,51 @@ class LLMService:
     def _get_fallback_question(self, domain: str, difficulty: str) -> Dict:
         """Fallback questions when LLM is unavailable"""
         fallback_questions = {
+            # Handle both underscore format and full names
+            "software_engineering": {
+                "easy": "What is the difference between a class and an object in object-oriented programming?",
+                "medium": "Explain the SOLID principles and provide an example of each.",
+                "hard": "Design a scalable microservices architecture for an e-commerce platform."
+            },
             "Software Engineering": {
                 "easy": "What is the difference between a class and an object in object-oriented programming?",
                 "medium": "Explain the SOLID principles and provide an example of each.",
                 "hard": "Design a scalable microservices architecture for an e-commerce platform."
+            },
+            "data_science": {
+                "easy": "What is the difference between supervised and unsupervised learning?",
+                "medium": "Explain bias-variance tradeoff and how to handle it.",
+                "hard": "Design an A/B testing framework for a recommendation system."
             },
             "Data Science": {
                 "easy": "What is the difference between supervised and unsupervised learning?",
                 "medium": "Explain bias-variance tradeoff and how to handle it.",
                 "hard": "Design an A/B testing framework for a recommendation system."
             },
+            "ai_ml": {
+                "easy": "What is the difference between artificial intelligence and machine learning?",
+                "medium": "Explain the concept of backpropagation in neural networks.",
+                "hard": "How would you implement a transformer model from scratch?"
+            },
             "AI/ML": {
                 "easy": "What is the difference between artificial intelligence and machine learning?",
                 "medium": "Explain the concept of backpropagation in neural networks.",
                 "hard": "How would you implement a transformer model from scratch?"
             },
+            "hardware_ece": {
+                "easy": "Explain Ohm's law and its applications.",
+                "medium": "What is the difference between analog and digital signals?",
+                "hard": "Design a low-power microcontroller system for IoT applications."
+            },
             "Hardware/ECE": {
                 "easy": "Explain Ohm's law and its applications.",
                 "medium": "What is the difference between analog and digital signals?",
                 "hard": "Design a low-power microcontroller system for IoT applications."
+            },
+            "robotics": {
+                "easy": "What are the main components of a robotic system?",
+                "medium": "Explain PID control and its use in robotics.",
+                "hard": "How would you implement SLAM for an autonomous robot?"
             },
             "Robotics": {
                 "easy": "What are the main components of a robotic system?",
@@ -356,8 +442,13 @@ class LLMService:
             }
         }
         
-        question = fallback_questions.get(domain, {}).get(difficulty, 
-            "Tell me about your experience in this field.")
+        # Try to get question for the exact domain first
+        questions_for_domain = fallback_questions.get(domain, {})
+        question = questions_for_domain.get(difficulty)
+        
+        # If not found, try a fallback
+        if not question:
+            question = "Tell me about your experience and approach to solving problems in this field."
         
         return {
             "question_text": question,
