@@ -48,34 +48,21 @@ class RAGService:
             print(f"Error initializing knowledge base: {e}")
     
     def _split_markdown_content(self, content: str, domain: str) -> List[Dict]:
-        """Split markdown content into meaningful sections"""
+        """Split markdown content into meaningful sections based on ## headings."""
         sections = []
-        lines = content.split('\n')
-        current_section = ""
-        current_heading = ""
+        # The [1:] skips the title and anything before the first heading
+        parts = content.split('## ')[1:]
         
-        for line in lines:
-            if line.startswith('## '):
-                # Save previous section
-                if current_section.strip():
-                    sections.append({
-                        "section": current_heading,
-                        "content": f"Domain: {domain}\nSection: {current_heading}\n{current_section.strip()}"
-                    })
-                
-                # Start new section
-                current_heading = line[3:].strip()
-                current_section = line + '\n'
-            else:
-                current_section += line + '\n'
-        
-        # Add final section
-        if current_section.strip():
-            sections.append({
-                "section": current_heading,
-                "content": f"Domain: {domain}\nSection: {current_heading}\n{current_section.strip()}"
-            })
-        
+        for part in parts:
+            lines = part.split('\n')
+            heading = lines[0].strip()
+            section_content = '\n'.join(lines[1:]).strip()
+            
+            if heading:
+                sections.append({
+                    "section": heading,
+                    "content": f"Domain: {domain}\nSection: {heading}\n{section_content}"
+                })
         return sections
     
     async def get_relevant_context(self, query: str, domain: str, n_results: int = 3) -> List[str]:
@@ -83,6 +70,10 @@ class RAGService:
         try:
             if domain in self.knowledge_base:
                 sections = self.knowledge_base[domain]["sections"]
+                
+                # If query is generic, return all section headings
+                if "topics" in query.lower():
+                    return [section["section"] for section in sections]
                 
                 # Simple keyword matching for now (could be enhanced with embeddings later)
                 query_words = query.lower().split()

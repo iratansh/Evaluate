@@ -62,10 +62,27 @@ export default function ProfessionalAvatar({ isPlaying, analyser }: InterviewAva
       ctx.shadowBlur = 20;
       ctx.shadowOffsetY = 10;
       
-      // Head shape (more realistic proportions)
       ctx.beginPath();
       ctx.ellipse(centerX, centerY - 10, 85, 95, 0, 0, 2 * Math.PI);
-      ctx.fillStyle = '#fbbf24'; // Warm skin tone
+      
+      // Create gradient for skin tone
+      const skinGradient = ctx.createRadialGradient(centerX - 20, centerY - 30, 10, centerX, centerY, 100);
+      skinGradient.addColorStop(0, '#fcd4a1');
+      skinGradient.addColorStop(0.6, '#fbbf24');
+      skinGradient.addColorStop(1, '#f59e0b');
+      ctx.fillStyle = skinGradient;
+      ctx.fill();
+      ctx.restore();
+      
+      // Add subtle cheek definition
+      ctx.save();
+      ctx.globalAlpha = 0.1;
+      ctx.beginPath();
+      ctx.ellipse(centerX - 45, centerY + 10, 20, 25, -0.2, 0, Math.PI);
+      ctx.fillStyle = '#f59e0b';
+      ctx.fill();
+      ctx.beginPath();
+      ctx.ellipse(centerX + 45, centerY + 10, 20, 25, 0.2, 0, Math.PI);
       ctx.fill();
       ctx.restore();
 
@@ -140,6 +157,7 @@ export default function ProfessionalAvatar({ isPlaying, analyser }: InterviewAva
       ctx.moveTo(centerX, centerY - 5);
       ctx.quadraticCurveTo(centerX + 10, centerY + 10, centerX, centerY + 15);
       ctx.stroke();
+      
 
       // Mouth
       ctx.strokeStyle = '#dc2626';

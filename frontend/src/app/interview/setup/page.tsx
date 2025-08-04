@@ -39,18 +39,16 @@ export default function InterviewSetup() {
       const response = await fetch(`http://localhost:8000/api/interview/domains/${domain}/topics`);
       if (response.ok) {
         const data = await response.json();
-        // Extract section headers from topics
-        const sections = data.topics
-          .map((topic: string) => {
-            const match = topic.match(/Section: ([^\n]+)/);
-            return match ? match[1] : null;
-          })
-          .filter((section: string | null) => section && section.trim() !== '')
-          .slice(0, 6); // Show first 6 sections
-        setDomainTopics(sections);
+        console.log('Received topics data:', data); // Debug log
+        
+        setDomainTopics(data.topics || []);
+      } else {
+        console.error('Failed to fetch topics:', response.status, response.statusText);
+        setDomainTopics([]);
       }
     } catch (error) {
       console.error('Error fetching domain topics:', error);
+      setDomainTopics([]);
     } finally {
       setLoadingTopics(false);
     }
@@ -134,32 +132,32 @@ export default function InterviewSetup() {
               </div>
 
               {/* Topics Preview */}
-              {formData.domain && (
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-3">
-                    Topics Covered
-                  </label>
-                  <div className="bg-gray-50 rounded-lg p-4">
-                    {loadingTopics ? (
-                      <div className="flex items-center space-x-2">
-                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-500"></div>
-                        <span className="text-sm text-gray-600">Loading topics...</span>
-                      </div>
-                    ) : domainTopics.length > 0 ? (
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                        {domainTopics.map((topic, index) => (
-                          <div key={index} className="flex items-center space-x-2">
-                            <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
-                            <span className="text-sm text-gray-700">{topic}</span>
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <span className="text-sm text-gray-500">Select a domain to see topics</span>
-                    )}
-                  </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-3">
+                  Topics Covered
+                </label>
+                <div className="bg-gray-50 rounded-lg p-4">
+                  {loadingTopics ? (
+                    <div className="flex items-center space-x-2">
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-500"></div>
+                      <span className="text-sm text-gray-600">Loading topics...</span>
+                    </div>
+                  ) : domainTopics.length > 0 ? (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                      {domainTopics.map((topic, index) => (
+                        <div key={index} className="flex items-center space-x-2">
+                          <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
+                          <span className="text-sm text-gray-700">{topic}</span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <span className="text-sm text-gray-500">
+                      {formData.domain ? 'No topics found for this domain.' : 'Select a domain to see topics'}
+                    </span>
+                  )}
                 </div>
-              )}
+              </div>
 
               {/* Difficulty Selection */}
               <div>
@@ -203,7 +201,7 @@ export default function InterviewSetup() {
                 <select
                   value={formData.duration_minutes}
                   onChange={(e) => setFormData({...formData, duration_minutes: parseInt(e.target.value)})}
-                  className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-black"
                 >
                   <option value={30}>30 minutes</option>
                   <option value={45}>45 minutes</option>
