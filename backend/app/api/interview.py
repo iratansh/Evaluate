@@ -275,20 +275,16 @@ async def submit_audio_answer(
         transcribed_text = await speech_service.speech_to_text(audio_data)
         
         # Check if transcription failed or is empty
-        if not transcribed_text or transcribed_text in [
-            "Speech recognition not available. Please type your answer.",
-            "Could not understand the audio. Please try again.",
-            "Speech recognition was cancelled. Please try again.",
-            "Speech recognition failed. Please type your answer.",
-            "Speech recognition error. Please type your answer."
-        ]:
+        if not transcribed_text or not transcribed_text.strip():
             # Return error response instead of evaluating
             return {
                 "question_id": question_id,
                 "score": 0,
-                "feedback": "No speech detected in the audio. Please ensure you're speaking clearly into the microphone.",
+                "feedback": "No speech detected in the audio. Please ensure you're speaking clearly into the microphone and try again.",
                 "suggestions": [
-                    "Make sure your microphone is working properly",
+                    "Check that your microphone is working and not muted",
+                    "Speak clearly and loudly enough for the microphone to pick up",
+                    "Try recording again or use the text input option instead",
                     "Speak clearly and at a normal pace",
                     "Try recording again or type your answer instead"
                 ],

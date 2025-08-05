@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter, useParams } from "next/navigation";
 import ProfessionalAvatar from "./avatar";
+import { useAudioRecorder } from '@/app/interview/session/hooks/useAudioRecorder';
 
 // Extend Window interface for webkit audio context
 declare global {
@@ -35,7 +36,6 @@ export default function InterviewSession() {
   const [session, setSession] = useState<Session | null>(null);
   const [currentQuestion, setCurrentQuestion] = useState<Question | null>(null);
   const [answer, setAnswer] = useState("");
-  const [isRecording, setIsRecording] = useState(false);
   const [feedback, setFeedback] = useState<{
     score: number;
     feedback: string;
@@ -48,20 +48,51 @@ export default function InterviewSession() {
   const [error, setError] = useState<string | null>(null);
   const [showTimeWarning, setShowTimeWarning] = useState(false);
 
-  // Audio related states
+  // Audio related states for TTS
   const [isPlayingTTS, setIsPlayingTTS] = useState(false);
   const [isPlayingFeedbackTTS, setIsPlayingFeedbackTTS] = useState(false);
   const [audioContext, setAudioContext] = useState<AudioContext | null>(null);
   const [analyser, setAnalyser] = useState<AnalyserNode | null>(null);
 
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const audioChunksRef = useRef<Blob[]>([]);
+  // Audio recording using custom hook
+  const { 
+    isRecording, 
+    startRecording: startAudioRecording, 
+    stopRecording: stopAudioRecording, 
+    error: recordingError,
+    isSupported: isRecordingSupported 
+  } = useAudioRecorder();
+  
+  // Display recording errors when they occur
+  useEffect(() => {
+    if (recordingError) {
+      setError(recordingError);
+      setTimeout(() => setError(null), 5000);
+    }
+  }, [recordingError]);
+
   const audioRef = useRef<HTMLAudioElement | null>(null);
   // const startTimeRef = useRef<Date | null>(null);
   const sessionStartTimeRef = useRef<Date | null>(null);
   const initializationRef = useRef<boolean>(false);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const autoRedirectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  const completeSessionAndRedirect = useCallback(async (sessionId: string) => {
+    try {
+      await fetch(
+        `http://localhost:8000/api/interview/sessions/${sessionId}/complete`,
+        {
+          method: "PUT",
+        }
+      );
+    } catch (error) {
+      console.error("Error completing session:", error);
+    } finally {
+      // Redirect regardless of completion success/failure
+      router.push(`/interview/results/${sessionId}`);
+    }
+  }, [router]);
 
   useEffect(() => {
     if (!sessionId) {
@@ -204,7 +235,7 @@ export default function InterviewSession() {
       }
       // DON'T reset initialization flag here to prevent re-initialization
     };
-  }, []); // Remove sessionId from dependency array to prevent re-runs
+  }, [sessionId, completeSessionAndRedirect]); // Add dependencies
 
   // Separate timer effect that depends on sessionId
   useEffect(() => {
@@ -241,23 +272,7 @@ export default function InterviewSession() {
         clearInterval(timerRef.current);
       }
     };
-  }, [session, sessionId]); // Keep sessionId dependency here for timer
-
-  const completeSessionAndRedirect = async (sessionId: string) => {
-    try {
-      await fetch(
-        `http://localhost:8000/api/interview/sessions/${sessionId}/complete`,
-        {
-          method: "PUT",
-        }
-      );
-    } catch (error) {
-      console.error("Error completing session:", error);
-    } finally {
-      // Redirect regardless of completion success/failure
-      router.push(`/interview/results/${sessionId}`);
-    }
-  };
+  }, [session, sessionId, completeSessionAndRedirect]); // Keep sessionId dependency here for timer
 
   const playQuestionAudio = async () => {
     if (!currentQuestion || !audioContext || !analyser) return;
@@ -464,44 +479,26 @@ export default function InterviewSession() {
     }
   };
 
-  const startRecording = async () => {
+const startRecording = async () => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mediaRecorder = new MediaRecorder(stream);
-      mediaRecorderRef.current = mediaRecorder;
-      audioChunksRef.current = [];
-
-      mediaRecorder.ondataavailable = (event) => {
-        audioChunksRef.current.push(event.data);
-      };
-
-      mediaRecorder.onstop = async () => {
-        const audioBlob = new Blob(audioChunksRef.current, {
-          type: "audio/wav",
-        });
-        await submitAudioAnswer(audioBlob);
-      };
-
-      mediaRecorder.start();
-      setIsRecording(true);
+      await startAudioRecording();
     } catch (error) {
       console.error("Error starting recording:", error);
-      setError("Failed to access microphone");
+      setError("Failed to start recording. Please check your microphone permissions.");
     }
   };
 
-  const stopRecording = () => {
-    if (
-      mediaRecorderRef.current &&
-      mediaRecorderRef.current.state !== "inactive"
-    ) {
-      mediaRecorderRef.current.stop();
-      setIsRecording(false);
-
-      // Stop all tracks
-      mediaRecorderRef.current.stream
-        .getTracks()
-        .forEach((track) => track.stop());
+  const stopRecording = async () => {
+    try {
+      const audioBlob = await stopAudioRecording();
+      if (audioBlob) {
+        await submitAudioAnswer(audioBlob);
+      } else {
+        setError("No audio was recorded. Please try again.");
+      }
+    } catch (error) {
+      console.error("Error stopping recording:", error);
+      setError("Failed to process recording. Please try again.");
     }
   };
 
@@ -509,9 +506,13 @@ export default function InterviewSession() {
     if (!currentQuestion) return;
 
     const formData = new FormData();
-    formData.append("audio_file", audioBlob, "answer.wav");
+    // Send with appropriate filename based on blob type - backend can handle both
+    const fileName = audioBlob.type.includes('wav') ? "answer.wav" : "answer.webm";
+    formData.append("audio_file", audioBlob, fileName);
 
     setLoading(true);
+    setError(null); // Clear any previous errors
+    
     try {
       const response = await fetch(
         `http://localhost:8000/api/interview/questions/${currentQuestion.id}/audio`,
@@ -522,7 +523,8 @@ export default function InterviewSession() {
       );
 
       if (!response.ok) {
-        throw new Error("Failed to submit audio");
+        const errorText = await response.text();
+        throw new Error(`Failed to submit audio: ${errorText}`);
       }
 
       const feedbackData = await response.json();
@@ -536,11 +538,15 @@ export default function InterviewSession() {
       } else {
         // Normal feedback
         setFeedback(feedbackData);
+        // Clear the answer field since we got feedback
+        setAnswer("");
       }
     } catch (error) {
       console.error("Error submitting audio answer:", error);
       setError(
-        "Failed to process audio. Please try again or type your answer."
+        error instanceof Error 
+          ? error.message 
+          : "Failed to process audio. Please try again or type your answer."
       );
       setTimeout(() => setError(null), 5000);
     } finally {

@@ -4,6 +4,7 @@ import asyncio
 from typing import Optional
 from app.config import settings
 import wave
+import io
 
 try:
     import azure.cognitiveservices.speech as speechsdk
@@ -31,9 +32,12 @@ class SpeechService:
                 region=self.speech_region
             )
             # Set male voice for text-to-speech
-            # Using Tony (Neural) - a professional male voice
             self.speech_config.speech_synthesis_voice_name = "en-US-TonyNeural"
-            print("SpeechService initialized with Azure Speech Services (Male voice: Tony)")
+            
+            # Configure speech recognition for better accuracy
+            self.speech_config.speech_recognition_language = "en-US"
+            
+            print("SpeechService initialized with Azure Speech Services")
         else:
             self.speech_config = None
             if not self.speech_key or not self.speech_region:
@@ -77,93 +81,41 @@ class SpeechService:
             return None
     
     async def speech_to_text(self, audio_data: bytes) -> Optional[str]:
-        """Convert speech audio to text with better silence detection"""
+        """Convert speech audio to text using temporary file approach"""
         if not AZURE_SPEECH_AVAILABLE or not self.speech_config:
             print(f"STT requested but Azure Speech not available for {len(audio_data)} bytes")
             return "Speech recognition not available. Please type your answer."
             
         try:
-            # Quick check for silence by analyzing audio data amplitude
-            import struct
-            import numpy as np
+            print(f"Processing audio data: {len(audio_data)} bytes")
             
-            # Try to detect if audio is mostly silence
-            try:
-                # Assuming 16-bit PCM audio
-                if len(audio_data) > 44:  # Skip WAV header if present
-                    # Check if it starts with RIFF header
-                    if audio_data[:4] == b'RIFF':
-                        # Find data chunk
-                        data_start = audio_data.find(b'data')
-                        if data_start != -1:
-                            data_start += 8  # Skip 'data' and size
-                            audio_samples = audio_data[data_start:]
-                        else:
-                            audio_samples = audio_data[44:]  # Standard WAV header size
-                    else:
-                        audio_samples = audio_data
-                    
-                    # Convert bytes to 16-bit integers
-                    if len(audio_samples) > 1000:
-                        samples = []
-                        for i in range(0, min(len(audio_samples) - 1, 10000), 2):
-                            sample = struct.unpack('<h', audio_samples[i:i+2])[0]
-                            samples.append(abs(sample))
-                        
-                        # Calculate average amplitude
-                        avg_amplitude = np.mean(samples)
-                        max_amplitude = np.max(samples)
-                        
-                        print(f"Audio analysis - Avg amplitude: {avg_amplitude}, Max amplitude: {max_amplitude}")
-                        
-                        # If average amplitude is very low, it's likely silence
-                        if avg_amplitude < 100 and max_amplitude < 500:
-                            print("Detected silence or very quiet audio")
-                            return ""
-            except Exception as e:
-                print(f"Error analyzing audio amplitude: {e}")
-                # Continue with normal speech recognition
-            
-            # Create a temporary WAV file with proper headers
+            # Create a temporary file for the audio data
             temp_file = f"temp_audio_{uuid.uuid4()}.wav"
             
-            # If the audio_data doesn't have WAV headers, we need to add them
-            try:
-                # Try to use the audio data as-is first (might already be a proper WAV)
-                with open(temp_file, "wb") as f:
-                    f.write(audio_data)
-                
-                # Test if it's a valid WAV by trying to read it
-                with wave.open(temp_file, 'rb') as wav_test:
-                    wav_test.readframes(1)
-                    
-            except (wave.Error, Exception):
-                # If it's not a valid WAV, assume it's raw audio and create a proper WAV file
-                print("Creating proper WAV file from raw audio data")
-                with wave.open(temp_file, 'wb') as wav_file:
-                    wav_file.setnchannels(1)  # Mono
-                    wav_file.setsampwidth(2)  # 16-bit
-                    wav_file.setframerate(16000)  # 16kHz sample rate
-                    wav_file.writeframes(audio_data)
+            # Convert to WAV format if needed and save to file
+            wav_data = await self._convert_to_wav_if_needed(audio_data)
             
-            # Create audio input from file
-            audio_input = speechsdk.AudioConfig(filename=temp_file)
+            with open(temp_file, "wb") as f:
+                f.write(wav_data)
             
-            # Configure speech recognizer with better settings
+            # Create audio config from file
+            audio_config = speechsdk.audio.AudioConfig(filename=temp_file)
+            
+            # Create recognizer with optimized settings
             speech_recognizer = speechsdk.SpeechRecognizer(
                 speech_config=self.speech_config,
-                audio_config=audio_input
+                audio_config=audio_config
             )
             
-            # Set properties for better recognition
+            # Configure recognition properties for better accuracy
             speech_recognizer.properties.set_property(
-                speechsdk.PropertyId.SpeechServiceConnection_InitialSilenceTimeoutMs, "5000"
+                speechsdk.PropertyId.SpeechServiceConnection_InitialSilenceTimeoutMs, "8000"
             )
             speech_recognizer.properties.set_property(
-                speechsdk.PropertyId.SpeechServiceConnection_EndSilenceTimeoutMs, "1000"
+                speechsdk.PropertyId.SpeechServiceConnection_EndSilenceTimeoutMs, "2000"
             )
             
-            # Run recognition in thread pool
+            # Perform recognition
             loop = asyncio.get_event_loop()
             result = await loop.run_in_executor(
                 None,
@@ -176,28 +128,134 @@ class SpeechService:
             except:
                 pass
             
+            # Process result
             if result.reason == speechsdk.ResultReason.RecognizedSpeech:
-                print(f"STT recognized: {result.text}")
-                return result.text
+                recognized_text = result.text.strip()
+                print(f"STT recognized: '{recognized_text}'")
+                if recognized_text:
+                    return recognized_text
+                else:
+                    return "No speech detected. Please speak clearly and try again."
+                    
             elif result.reason == speechsdk.ResultReason.NoMatch:
-                print("STT: No speech recognized")
-                # Return empty string for no speech instead of error message
-                return ""
+                print(f"STT: No speech recognized")
+                # Provide more helpful feedback
+                no_match_details = result.no_match_details
+                if no_match_details == speechsdk.NoMatchReason.InitialSilenceTimeout:
+                    return "No speech detected. Please start speaking after clicking record."
+                elif no_match_details == speechsdk.NoMatchReason.InitialBabbleTimeout:
+                    return "Could not understand the audio. Please speak more clearly."
+                else:
+                    return "No speech detected. Please ensure your microphone is working and try again."
+                    
             elif result.reason == speechsdk.ResultReason.Canceled:
                 cancellation_details = speechsdk.CancellationDetails(result)
-                print(f"STT cancelled: {cancellation_details.reason}, {cancellation_details.error_details}")
+                print(f"STT cancelled: {cancellation_details.reason}")
+                print(f"Error details: {cancellation_details.error_details}")
+                
                 if cancellation_details.reason == speechsdk.CancellationReason.Error:
-                    return "Speech recognition error. Please type your answer."
+                    if "1006" in str(cancellation_details.error_details):
+                        return "No speech detected in the recording. Please speak clearly into the microphone."
+                    else:
+                        return "Speech recognition error. Please try again or type your answer."
                 else:
-                    # Likely no speech detected
-                    return ""
+                    return "Speech recognition was cancelled. Please try again."
             else:
-                print(f"STT failed: {result.reason}")
-                return "Speech recognition failed. Please type your answer."
+                print(f"STT failed with reason: {result.reason}")
+                return "Speech recognition failed. Please try again or type your answer."
                 
         except Exception as e:
             print(f"Error in speech_to_text: {e}")
-            return "Speech recognition error. Please type your answer."
+            import traceback
+            traceback.print_exc()
+            return "Speech recognition error. Please type your answer instead."
+    
+    async def _convert_to_wav_if_needed(self, audio_data: bytes) -> bytes:
+        """Convert audio to WAV format if it's not already"""
+        # Check if already WAV
+        if audio_data[:4] == b'RIFF':
+            print("Audio is already in WAV format")
+            return audio_data
+        
+        print(f"Converting audio to WAV format. Input format detected from first 10 bytes: {audio_data[:10]}")
+        
+        # Try to use pydub for better format conversion
+        try:
+            from pydub import AudioSegment
+            print("Using pydub for audio conversion")
+            
+            # Try to detect and convert WebM/other formats
+            audio_buffer = io.BytesIO(audio_data)
+            
+            # Try different formats
+            for format_type in ['webm', 'ogg', 'mp4', 'wav']:
+                try:
+                    audio_buffer.seek(0)
+                    audio = AudioSegment.from_file(audio_buffer, format=format_type)
+                    
+                    # Convert to WAV with speech-optimized settings
+                    wav_buffer = io.BytesIO()
+                    audio = audio.set_frame_rate(16000).set_channels(1).set_sample_width(2)
+                    audio.export(wav_buffer, format="wav")
+                    
+                    wav_buffer.seek(0)
+                    converted_data = wav_buffer.read()
+                    print(f"Successfully converted {format_type} to WAV: {len(converted_data)} bytes")
+                    return converted_data
+                    
+                except Exception as e:
+                    print(f"Failed to convert as {format_type}: {e}")
+                    continue
+                    
+        except ImportError:
+            print("pydub not available, using fallback conversion")
+        
+        # Fallback: Create a basic WAV file
+        # This might not work for all formats but will prevent crashes
+        sample_rate = 16000
+        bits_per_sample = 16
+        num_channels = 1
+        
+        # If the audio data looks like raw PCM, wrap it in WAV
+        if len(audio_data) > 44:  # Minimum size for meaningful audio
+            wav_buffer = io.BytesIO()
+            
+            # Try to extract meaningful audio data (skip potential headers)
+            audio_samples = audio_data
+            if len(audio_data) > 1000:
+                # Skip first 1000 bytes which might be headers
+                audio_samples = audio_data[1000:]
+            
+            with wave.open(wav_buffer, 'wb') as wav_file:
+                wav_file.setnchannels(num_channels)
+                wav_file.setsampwidth(bits_per_sample // 8)
+                wav_file.setframerate(sample_rate)
+                wav_file.writeframes(audio_samples)
+            
+            wav_buffer.seek(0)
+            fallback_data = wav_buffer.read()
+            print(f"Created fallback WAV file: {len(fallback_data)} bytes")
+            return fallback_data
+        
+        # If all else fails, return original data
+        print("Returning original audio data")
+        return audio_data
+    
+    def create_silence_wav(self, duration_seconds: float = 0.1) -> bytes:
+        """Create a WAV file with silence for testing"""
+        sample_rate = 16000
+        num_samples = int(sample_rate * duration_seconds)
+        
+        wav_buffer = io.BytesIO()
+        with wave.open(wav_buffer, 'wb') as wav_file:
+            wav_file.setnchannels(1)
+            wav_file.setsampwidth(2)
+            wav_file.setframerate(sample_rate)
+            # Write silence (zeros)
+            wav_file.writeframes(b'\x00' * (num_samples * 2))
+        
+        wav_buffer.seek(0)
+        return wav_buffer.read()
 
 class StorageService:
     def __init__(self):
