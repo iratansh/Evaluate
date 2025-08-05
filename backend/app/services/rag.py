@@ -48,21 +48,34 @@ class RAGService:
             print(f"Error initializing knowledge base: {e}")
     
     def _split_markdown_content(self, content: str, domain: str) -> List[Dict]:
-        """Split markdown content into meaningful sections based on ## headings."""
+        """Split markdown content into meaningful sections"""
         sections = []
-        # The [1:] skips the title and anything before the first heading
-        parts = content.split('## ')[1:]
+        lines = content.split('\n')
+        current_section = ""
+        current_heading = ""
         
-        for part in parts:
-            lines = part.split('\n')
-            heading = lines[0].strip()
-            section_content = '\n'.join(lines[1:]).strip()
-            
-            if heading:
-                sections.append({
-                    "section": heading,
-                    "content": f"Domain: {domain}\nSection: {heading}\n{section_content}"
-                })
+        for line in lines:
+            if line.startswith('## '):
+                # Save previous section
+                if current_section.strip():
+                    sections.append({
+                        "section": current_heading,
+                        "content": f"Domain: {domain}\nSection: {current_heading}\n{current_section.strip()}"
+                    })
+                
+                # Start new section
+                current_heading = line[3:].strip()
+                current_section = line + '\n'
+            else:
+                current_section += line + '\n'
+        
+        # Add final section
+        if current_section.strip():
+            sections.append({
+                "section": current_heading,
+                "content": f"Domain: {domain}\nSection: {current_heading}\n{current_section.strip()}"
+            })
+        
         return sections
     
     async def get_relevant_context(self, query: str, domain: str, n_results: int = 3) -> List[str]:
@@ -173,25 +186,35 @@ class RAGService:
         context_text = "\n".join(relevant_context) if relevant_context else ""
         
         enhanced_prompt = f"""
-        As an expert interviewer for {domain}, evaluate this answer using the domain-specific context below.
-        
+        You are a hyper-critical but fair expert interviewer for {domain}. Your task is to evaluate the given answer to a question, using the provided domain-specific context. Be extremely discerning and hold a high standard for accuracy, relevance, and depth.
+
         DOMAIN CONTEXT:
         {context_text}
-        
+
         Question: {question}
         Answer: {answer}
-        
-        Based on the domain context above, provide:
-        1. Score (0-10) - be specific about why this score, since it should reflect both the answer quality and relevance to the question
-        2. Strengths in the answer (reference specific concepts from context)
-        3. Areas for improvement (what domain concepts are missing)
-        4. Specific suggestions (reference the context topics)
-        
-        Format:
+
+        **Evaluation Instructions:**
+
+        Your evaluation must be strict. Follow this scoring rubric precisely:
+        - **0-1:** Gibberish, completely irrelevant, or nonsensical answers.
+        - **2-3:** Answer attempts to address the question but is fundamentally wrong, contains major inaccuracies, or completely misses the key concepts.
+        - **4-5:** Answer is partially correct but is superficial, lacks detail, or has significant gaps. It may mention some relevant terms without demonstrating true understanding.
+        - **6-7:** Answer is mostly correct and demonstrates a basic understanding of the topic. It is on the right track but could be more detailed, nuanced, or better structured.
+        - **8-9:** Answer is accurate, well-structured, and detailed. It correctly uses key concepts and demonstrates a solid understanding. Minor improvements may be possible.
+        - **10:** Answer is exceptional. It is not only accurate and detailed but also insightful, providing a comprehensive and nuanced explanation that demonstrates deep expertise.
+
+        Based on the rubric and the domain context, provide the following:
+        1.  **Score (0-10):** Strictly adhere to the rubric above. Justify the score with specific reasons based on the answer's quality and relevance.
+        2.  **Strengths:** Identify any correct or relevant points in the answer, referencing specific concepts from the domain context.
+        3.  **Areas for Improvement:** Pinpoint exactly what is missing or incorrect. What key domain concepts were ignored or misunderstood?
+        4.  **Specific Suggestions:** Provide concrete, actionable advice for how the candidate could have improved their answer, referencing the context topics.
+
+        **Format:**
         Score: [0-10]
-        Strengths: [specific strengths with domain context]
-        Improvements: [missing concepts from domain context]
-        Suggestions: [specific suggestions based on context]
+        Strengths: [Specific strengths with domain context]
+        Improvements: [Missing concepts from domain context]
+        Suggestions: [Specific suggestions based on context]
         """
         
         return enhanced_prompt

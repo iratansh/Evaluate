@@ -1,0 +1,126 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ master, main ]
+  pull_request:
+    branches: [ master, main ]
+
+jobs:
+  backend-tests:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+    
+    - name: Cache pip dependencies
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements*.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+    
+    - name: Install dependencies
+      run: |
+        cd backend
+        python -m pip install --upgrade pip
+        pip install fastapi uvicorn pytest httpx
+        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+        if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
+        if [ -f tests/requirements.txt ]; then pip install -r tests/requirements.txt; fi
+    
+    - name: Run backend tests
+      run: |
+        cd backend
+        python -m pytest tests/ -v --tb=short
+    
+    - name: Test API endpoints
+      run: |
+        cd backend
+        python -c "
+        import subprocess
+        import time
+        import requests
+        import sys
+        
+        # Start the server in background
+        proc = subprocess.Popen(['python', '-m', 'uvicorn', 'app.main:app', '--host', '0.0.0.0', '--port', '8000'])
+        
+        # Wait for server to start
+        time.sleep(5)
+        
+        try:
+            # Test health endpoint
+            response = requests.get('http://localhost:8000/health/')
+            assert response.status_code == 200, f'Health check failed: {response.status_code}'
+            print('✓ Health check passed')
+            
+            # Test root endpoint
+            response = requests.get('http://localhost:8000/')
+            assert response.status_code == 200, f'Root endpoint failed: {response.status_code}'
+            print('✓ Root endpoint passed')
+            
+            print('All API tests passed!')
+        except Exception as e:
+            print(f'API test failed: {e}')
+            sys.exit(1)
+        finally:
+            proc.terminate()
+            proc.wait()
+        "
+
+  frontend-tests:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Use Node.js 18
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+        cache-dependency-path: frontend/package-lock.json
+    
+    - name: Install frontend dependencies
+      run: |
+        cd frontend
+        npm ci
+    
+    - name: Run ESLint
+      run: |
+        cd frontend
+        npm run lint
+    
+    - name: Build frontend
+      run: |
+        cd frontend
+        npm run build
+    
+    - name: Check TypeScript
+      run: |
+        cd frontend
+        npx tsc --noEmit
+
+  docker-build:
+    runs-on: ubuntu-latest
+    needs: [backend-tests, frontend-tests]
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Test Docker Compose build
+      run: |
+        docker-compose build --no-cache
+        docker-compose config
+    
+    - name: Test production Docker build
+      run: |
+        docker-compose -f docker-compose.prod.yml build --no-cache
+        docker-compose -f docker-compose.prod.yml config

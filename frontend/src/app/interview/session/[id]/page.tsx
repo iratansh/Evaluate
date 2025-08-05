@@ -24,6 +24,7 @@ interface Session {
   difficulty: string;
   status: string;
   duration_minutes: number;
+  created_at: string;
 }
 
 export default function InterviewSession() {
@@ -43,7 +44,9 @@ export default function InterviewSession() {
   const [loading, setLoading] = useState(false);
   const [questionCount, setQuestionCount] = useState(0);
   const [elapsedTime, setElapsedTime] = useState(0);
+  const [timeRemaining, setTimeRemaining] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [showTimeWarning, setShowTimeWarning] = useState(false);
 
   // Audio related states
   const [isPlayingTTS, setIsPlayingTTS] = useState(false);
@@ -54,6 +57,10 @@ export default function InterviewSession() {
   const audioChunksRef = useRef<Blob[]>([]);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const startTimeRef = useRef<Date | null>(null);
+  const sessionStartTimeRef = useRef<Date | null>(null);
+  const initializationRef = useRef<boolean>(false);
+  const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const autoRedirectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     if (!sessionId) {
@@ -61,9 +68,19 @@ export default function InterviewSession() {
       return;
     }
 
+    // Prevent duplicate initialization with a more robust check
+    if (initializationRef.current) {
+      console.log("Skipping duplicate initialization");
+      return;
+    }
+
+    console.log("Starting session initialization for session:", sessionId);
+    initializationRef.current = true;
+
     const initializeSession = async () => {
       try {
         // Fetch session details
+        console.log("Fetching session details...");
         const response = await fetch(
           `http://localhost:8000/api/interview/sessions/${sessionId}`
         );
@@ -72,10 +89,43 @@ export default function InterviewSession() {
         }
 
         const sessionData = await response.json();
+        console.log("Session data received:", sessionData);
         setSession(sessionData);
 
-        // Get first question
-        console.log("Loading first question for session:", sessionId);
+        // Parse session start time properly (handle potential timezone issues)
+        const sessionStartTime = new Date(
+          sessionData.created_at +
+            (sessionData.created_at.includes("Z") ? "" : "Z")
+        );
+        sessionStartTimeRef.current = sessionStartTime;
+
+        console.log("Session start time:", sessionStartTime);
+        console.log("Current time:", new Date());
+
+        const sessionDurationMs = sessionData.duration_minutes * 60 * 1000;
+        const currentTime = new Date();
+        const elapsedMs = currentTime.getTime() - sessionStartTime.getTime();
+        const remainingMs = sessionDurationMs - elapsedMs;
+
+        console.log("Session duration (ms):", sessionDurationMs);
+        console.log("Elapsed (ms):", elapsedMs);
+        console.log("Remaining (ms):", remainingMs);
+
+        // Check if session has already expired
+        if (remainingMs <= 0) {
+          console.log("Session has expired, redirecting...");
+          await completeSessionAndRedirect(sessionId);
+          return;
+        }
+
+        // Set initial time states
+        setElapsedTime(Math.max(0, Math.floor(elapsedMs / 1000)));
+        setTimeRemaining(Math.max(0, Math.floor(remainingMs / 1000)));
+
+        // Get first question - add a small delay to prevent race conditions
+        console.log("Fetching first question...");
+        await new Promise((resolve) => setTimeout(resolve, 100)); // 100ms delay
+
         const questionResponse = await fetch(
           "http://localhost:8000/api/interview/questions",
           {
@@ -91,21 +141,13 @@ export default function InterviewSession() {
         );
 
         if (!questionResponse.ok) {
-          const errorText = await questionResponse.text();
-          console.error("Failed to get first question:", questionResponse.status, errorText);
-          throw new Error(`Failed to get first question (${questionResponse.status})`);
+          throw new Error("Failed to get first question");
         }
 
         const question = await questionResponse.json();
-        
-        if (question && question.question_text) {
-          setCurrentQuestion(question);
-          setQuestionCount(1);
-          console.log(`First question loaded: ${question.question_text.substring(0, 50)}...`);
-        } else {
-          console.error("Invalid first question received:", question);
-          throw new Error("Invalid question format received");
-        }
+        console.log("First question received:", question);
+        setCurrentQuestion(question);
+        setQuestionCount(1);
 
         // Initialize audio context
         const AudioContextClass =
@@ -115,6 +157,27 @@ export default function InterviewSession() {
         analyserNode.fftSize = 256;
         setAudioContext(ctx);
         setAnalyser(analyserNode);
+
+        // Set up auto-redirect timer
+        if (remainingMs > 30000) {
+          // If more than 30 seconds left
+          // Show warning 30 seconds before end
+          autoRedirectTimeoutRef.current = setTimeout(() => {
+            setShowTimeWarning(true);
+            // Auto-redirect after warning
+            setTimeout(async () => {
+              await completeSessionAndRedirect(sessionId);
+            }, 30000);
+          }, remainingMs - 30000);
+        } else {
+          // Less than 30 seconds left, show warning immediately and redirect soon
+          setShowTimeWarning(true);
+          autoRedirectTimeoutRef.current = setTimeout(async () => {
+            await completeSessionAndRedirect(sessionId);
+          }, remainingMs);
+        }
+
+        console.log("Session initialization completed successfully");
       } catch (error) {
         console.error("Error initializing session:", error);
         setError(
@@ -122,23 +185,78 @@ export default function InterviewSession() {
             ? error.message
             : "Failed to initialize session"
         );
+        // Reset initialization flag on error so retry is possible
+        initializationRef.current = false;
       }
     };
 
     initializeSession();
 
-    // Start timer
-    startTimeRef.current = new Date();
-    const timer = setInterval(() => {
-      if (startTimeRef.current) {
-        setElapsedTime(
-          Math.floor((Date.now() - startTimeRef.current.getTime()) / 1000)
-        );
+    return () => {
+      console.log("Cleaning up session initialization");
+      // Cleanup timers
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
       }
-    }, 1000);
+      if (autoRedirectTimeoutRef.current) {
+        clearTimeout(autoRedirectTimeoutRef.current);
+      }
+      // DON'T reset initialization flag here to prevent re-initialization
+    };
+  }, []); // Remove sessionId from dependency array to prevent re-runs
 
-    return () => clearInterval(timer);
-  }, [sessionId]);
+  // Separate timer effect that depends on sessionId
+  useEffect(() => {
+    if (!sessionStartTimeRef.current || !session || !sessionId) return;
+
+    const updateTimer = () => {
+      const currentTime = new Date();
+      const sessionStartTime = sessionStartTimeRef.current!;
+      const sessionDurationMs = session.duration_minutes * 60 * 1000;
+      const elapsedMs = currentTime.getTime() - sessionStartTime.getTime();
+      const remainingMs = Math.max(0, sessionDurationMs - elapsedMs);
+
+      const elapsedSeconds = Math.max(0, Math.floor(elapsedMs / 1000));
+      const remainingSeconds = Math.max(0, Math.floor(remainingMs / 1000));
+
+      setElapsedTime(elapsedSeconds);
+      setTimeRemaining(remainingSeconds);
+
+      // If time is up, redirect
+      if (remainingMs <= 0) {
+        console.log("Timer expired, redirecting to results...");
+        completeSessionAndRedirect(sessionId);
+      }
+    };
+
+    // Update immediately
+    updateTimer();
+
+    // Set up interval
+    timerRef.current = setInterval(updateTimer, 1000);
+
+    return () => {
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+      }
+    };
+  }, [session, sessionId]); // Keep sessionId dependency here for timer
+
+  const completeSessionAndRedirect = async (sessionId: string) => {
+    try {
+      await fetch(
+        `http://localhost:8000/api/interview/sessions/${sessionId}/complete`,
+        {
+          method: "PUT",
+        }
+      );
+    } catch (error) {
+      console.error("Error completing session:", error);
+    } finally {
+      // Redirect regardless of completion success/failure
+      router.push(`/interview/results/${sessionId}`);
+    }
+  };
 
   const playQuestionAudio = async () => {
     if (!currentQuestion || !audioContext || !analyser) return;
@@ -206,15 +324,7 @@ export default function InterviewSession() {
       return;
     }
 
-    // Prevent duplicate calls
-    if (loading) {
-      console.log("Already loading a question, skipping duplicate call");
-      return;
-    }
-
     setLoading(true);
-    setError(null); // Clear any previous errors
-    
     try {
       const response = await fetch(
         "http://localhost:8000/api/interview/questions",
@@ -225,38 +335,31 @@ export default function InterviewSession() {
           },
           body: JSON.stringify({
             session_id: parseInt(sessionId),
-            context: currentQuestion
-              ? `Previous question: ${currentQuestion.question_text}`
-              : null,
+            context: `Previous question: ${
+              currentQuestion?.question_text || ""
+            }. Moving to next question.`,
           }),
         }
       );
 
       if (!response.ok) {
-        const errorText = await response.text();
-        console.error("Failed to get next question:", response.status, errorText);
-        throw new Error(`Failed to get next question (${response.status})`);
+        const errorData = await response.json();
+        if (response.status === 410) {
+          // Time expired
+          await completeSessionAndRedirect(sessionId);
+          return;
+        }
+        throw new Error("Failed to get next question");
       }
 
       const question = await response.json();
-      
-      // Only update if we got a valid question and it's different from current
-      if (question && question.question_text && 
-          (!currentQuestion || question.id !== currentQuestion.id)) {
-        setCurrentQuestion(question);
-        setAnswer("");
-        setFeedback(null);
-        setQuestionCount((prev) => prev + 1);
-        console.log(`Successfully loaded question ${question.id}: ${question.question_text.substring(0, 50)}...`);
-      } else {
-        console.warn("Received invalid or duplicate question:", question);
-        setError("Failed to generate a new question. Please try again.");
-        setTimeout(() => setError(null), 4000);
-      }
+      setCurrentQuestion(question);
+      setAnswer("");
+      setFeedback(null);
+      setQuestionCount((prev) => prev + 1);
     } catch (error) {
       console.error("Error getting next question:", error);
-      setError("Failed to get next question. Please try again.");
-      setTimeout(() => setError(null), 5000);
+      setError("Failed to get next question");
     } finally {
       setLoading(false);
     }
@@ -297,7 +400,6 @@ export default function InterviewSession() {
 
   const startRecording = async () => {
     try {
-      // Request microphone permission
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const mediaRecorder = new MediaRecorder(stream);
       mediaRecorderRef.current = mediaRecorder;
@@ -314,39 +416,11 @@ export default function InterviewSession() {
         await submitAudioAnswer(audioBlob);
       };
 
-      mediaRecorder.onerror = (event) => {
-        console.error("MediaRecorder error:", event);
-        setError("Recording error occurred. Please try again or type your answer.");
-        setIsRecording(false);
-        // Stop all tracks to clean up
-        stream.getTracks().forEach((track) => track.stop());
-        setTimeout(() => setError(null), 5000);
-      };
-
       mediaRecorder.start();
       setIsRecording(true);
     } catch (error) {
       console.error("Error starting recording:", error);
-      let errorMessage = "Failed to access microphone. ";
-      
-      if (error instanceof Error) {
-        if (error.name === "NotAllowedError") {
-          errorMessage += "Please allow microphone access and try again.";
-        } else if (error.name === "NotFoundError") {
-          errorMessage += "No microphone found. Please check your audio devices.";
-        } else if (error.name === "NotSupportedError") {
-          errorMessage += "Audio recording not supported in this browser.";
-        } else {
-          errorMessage += "Please try again or type your answer.";
-        }
-      } else {
-        errorMessage += "Please try again or type your answer.";
-      }
-      
-      setError(errorMessage);
-      setIsRecording(false);
-      // Clear error after 7 seconds for microphone errors
-      setTimeout(() => setError(null), 7000);
+      setError("Failed to access microphone");
     }
   };
 
@@ -366,11 +440,7 @@ export default function InterviewSession() {
   };
 
   const submitAudioAnswer = async (audioBlob: Blob) => {
-    if (!currentQuestion) {
-      setError("No current question available");
-      setTimeout(() => setError(null), 3000);
-      return;
-    }
+    if (!currentQuestion) return;
 
     const formData = new FormData();
     formData.append("audio_file", audioBlob, "answer.wav");
@@ -386,43 +456,27 @@ export default function InterviewSession() {
       );
 
       if (!response.ok) {
-        const errorText = await response.text();
-        console.error("Audio submission failed:", response.status, errorText);
-        throw new Error(`Failed to submit audio (${response.status})`);
+        throw new Error("Failed to submit audio");
       }
 
       const feedbackData = await response.json();
 
       // Check if it's an error response
       if (feedbackData.error) {
-        // Show error as a temporary alert but don't redirect
-        console.warn("Speech-to-text error:", feedbackData.feedback);
-        setError(`Speech recognition issue: ${feedbackData.feedback || 'Could not process audio'}. Please try recording again or type your answer.`);
-        // Clear error after 6 seconds
-        setTimeout(() => setError(null), 6000);
+        // Show error as a temporary alert
+        setError(feedbackData.feedback);
+        // Clear error after 5 seconds
+        setTimeout(() => setError(null), 5000);
       } else {
-        // Normal feedback - clear any previous errors
-        setError(null);
+        // Normal feedback
         setFeedback(feedbackData);
       }
     } catch (error) {
       console.error("Error submitting audio answer:", error);
-      
-      let errorMessage = "Failed to process audio. ";
-      if (error instanceof Error) {
-        if (error.message.includes("NetworkError") || error.message.includes("fetch")) {
-          errorMessage += "Network connection issue. Please check your connection and try again.";
-        } else if (error.message.includes("500")) {
-          errorMessage += "Server error processing audio. Please try recording again.";
-        } else {
-          errorMessage += error.message;
-        }
-      }
-      errorMessage += " You can try recording again or type your answer instead.";
-      
-      setError(errorMessage);
-      // Clear error after 8 seconds for processing errors
-      setTimeout(() => setError(null), 8000);
+      setError(
+        "Failed to process audio. Please try again or type your answer."
+      );
+      setTimeout(() => setError(null), 5000);
     } finally {
       setLoading(false);
     }
@@ -451,6 +505,10 @@ export default function InterviewSession() {
   };
 
   const formatTime = (seconds: number) => {
+    if (seconds < 0) {
+      console.warn("Negative time value:", seconds);
+      return "0:00";
+    }
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
     return `${mins}:${secs.toString().padStart(2, "0")}`;
@@ -501,6 +559,45 @@ export default function InterviewSession() {
 
   return (
     <div className="min-h-screen bg-gray-50">
+      {/* Time Warning Modal */}
+      {showTimeWarning && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 max-w-md mx-4">
+            <div className="text-center">
+              <div className="text-yellow-600 mb-4">
+                <svg
+                  className="w-12 h-12 mx-auto"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+                  />
+                </svg>
+              </div>
+              <h3 className="text-lg font-semibold text-gray-900 mb-2">
+                Time Almost Up!
+              </h3>
+              <p className="text-gray-600 mb-4">
+                Your interview will automatically end in{" "}
+                {formatTime(timeRemaining)}. You'll be redirected to your
+                results shortly.
+              </p>
+              <button
+                onClick={() => completeSessionAndRedirect(sessionId)}
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+              >
+                Go to Results Now
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <div className="bg-white shadow-sm">
         <div className="container mx-auto px-4 py-4">
@@ -512,9 +609,15 @@ export default function InterviewSession() {
               <p className="text-sm text-gray-600">Question {questionCount}</p>
             </div>
             <div className="text-right">
-              <div className="text-lg font-mono text-gray-900">{formatTime(elapsedTime)}</div>
+              <div
+                className={`text-lg font-mono ${
+                  timeRemaining <= 60 ? "text-red-600" : "text-gray-900"
+                }`}
+              >
+                {formatTime(timeRemaining)} remaining
+              </div>
               <div className="text-sm text-gray-600">
-                {session.duration_minutes} min session
+                {formatTime(elapsedTime)} elapsed
               </div>
             </div>
           </div>
@@ -525,10 +628,7 @@ export default function InterviewSession() {
         <div className="max-w-4xl mx-auto">
           {/* Avatar Section */}
           <div className="bg-white rounded-lg shadow-sm p-6 mb-6">
-            <ProfessionalAvatar
-              isPlaying={isPlayingTTS}
-              analyser={analyser}
-            />
+            <ProfessionalAvatar isPlaying={isPlayingTTS} analyser={analyser} />
             <div className="text-center mt-4">
               <button
                 onClick={playQuestionAudio}
@@ -601,7 +701,9 @@ export default function InterviewSession() {
           {/* Feedback */}
           {feedback && (
             <div className="bg-white rounded-lg shadow-sm p-6 mb-6">
-              <h3 className="text-lg font-semibold text-gray-900 mb-4">Feedback</h3>
+              <h3 className="text-lg font-semibold text-gray-900 mb-4">
+                Feedback
+              </h3>
 
               <div className="mb-4">
                 <div className="flex items-center mb-2">

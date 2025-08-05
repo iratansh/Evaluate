@@ -221,26 +221,18 @@ class LLMService:
         """Provide a meaningful fallback evaluation when LLM is unavailable"""
         # Basic scoring based on answer length and keywords
         answer_length = len(answer.split())
-        answer_lower = answer.lower().strip()
         
-        # Check for non-answers or very poor responses
-        non_answers = ['i don\'t know', 'no idea', 'not sure', 'don\'t know', 'idk', 'dunno', 'no clue', 'unsure']
-        if any(non_answer in answer_lower for non_answer in non_answers):
-            score = 0.5
-            feedback = "Not knowing the answer is understandable, but in interviews you should try to demonstrate your thought process or mention related concepts."
-        elif answer_length < 3:
-            score = 1.0
-            feedback = "Your answer is extremely brief. Technical interviews require detailed explanations with specific examples and reasoning."
-        elif answer_length < 8:
-            score = 2.5
-            feedback = "Your answer is too brief. Try to explain your reasoning, provide examples, and demonstrate your understanding."
-        elif answer_length < 20:
+        # More generous scoring logic
+        if answer_length < 5:
+            score = 2.0
+            feedback = "Your answer is too brief. Technical interviews require detailed explanations with specific examples."
+        elif answer_length < 15:
             score = 4.0
-            feedback = "Your answer covers some basics but needs more detail. Explain the reasoning behind your approach and provide specific examples."
-        elif answer_length < 50:
-            score = 6.0
-            feedback = "Good answer with reasonable detail. Consider adding specific examples, discussing trade-offs, or alternative approaches."
-        elif answer_length < 100:
+            feedback = "Your answer covers some basics but needs more detail. Try to explain the reasoning behind your approach."
+        elif answer_length < 40:
+            score = 6.5
+            feedback = "Good answer with reasonable detail. Consider adding specific examples or discussing alternative approaches."
+        elif answer_length < 80:
             score = 7.5
             feedback = "Well-structured answer with good detail. You demonstrated solid understanding of the concepts."
         else:
