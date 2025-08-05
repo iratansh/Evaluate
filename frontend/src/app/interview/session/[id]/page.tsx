@@ -50,6 +50,7 @@ export default function InterviewSession() {
 
   // Audio related states
   const [isPlayingTTS, setIsPlayingTTS] = useState(false);
+  const [isPlayingFeedbackTTS, setIsPlayingFeedbackTTS] = useState(false);
   const [audioContext, setAudioContext] = useState<AudioContext | null>(null);
   const [analyser, setAnalyser] = useState<AnalyserNode | null>(null);
 
@@ -315,6 +316,71 @@ export default function InterviewSession() {
     } catch (error) {
       console.error("Error playing audio:", error);
       setIsPlayingTTS(false);
+    }
+  };
+
+  const playFeedbackAudio = async () => {
+    if (!feedback || !audioContext || !analyser) return;
+
+    try {
+      setIsPlayingFeedbackTTS(true);
+
+      // Create the feedback text to be spoken
+      let feedbackText = `Your score is ${feedback.score} out of 10. ${feedback.feedback}`;
+      
+      // Add suggestions if they exist
+      if (feedback.suggestions && feedback.suggestions.length > 0) {
+        feedbackText += ` Here are some suggestions for improvement: ${feedback.suggestions.join('. ')}.`;
+      }
+
+      // Fetch audio from backend
+      const response = await fetch(
+        `http://localhost:8000/api/interview/feedback/speech`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ text: feedbackText }),
+        }
+      );
+
+      if (!response.ok) {
+        // Check if it's a JSON response indicating TTS is not available
+        try {
+          const errorData = await response.json();
+          if (errorData.error) {
+            console.log("TTS not available:", errorData.error);
+            setIsPlayingFeedbackTTS(false);
+            return;
+          }
+        } catch {
+          // If JSON parsing fails, it's likely another error
+        }
+        throw new Error("Failed to get audio");
+      }
+
+      const audioBlob = await response.blob();
+      const audioUrl = URL.createObjectURL(audioBlob);
+
+      // Create and play audio
+      const audio = new Audio(audioUrl);
+      audioRef.current = audio;
+
+      // Connect to analyser
+      const source = audioContext.createMediaElementSource(audio);
+      source.connect(analyser);
+      analyser.connect(audioContext.destination);
+
+      audio.onended = () => {
+        setIsPlayingFeedbackTTS(false);
+        URL.revokeObjectURL(audioUrl);
+      };
+
+      await audio.play();
+    } catch (error) {
+      console.error("Error playing feedback audio:", error);
+      setIsPlayingFeedbackTTS(false);
     }
   };
 
@@ -628,7 +694,7 @@ export default function InterviewSession() {
         <div className="max-w-4xl mx-auto">
           {/* Avatar Section */}
           <div className="bg-white rounded-lg shadow-sm p-6 mb-6">
-            <ProfessionalAvatar isPlaying={isPlayingTTS} analyser={analyser} />
+            <ProfessionalAvatar isPlaying={isPlayingTTS || isPlayingFeedbackTTS} analyser={analyser} />
             <div className="text-center mt-4">
               <button
                 onClick={playQuestionAudio}
@@ -701,9 +767,22 @@ export default function InterviewSession() {
           {/* Feedback */}
           {feedback && (
             <div className="bg-white rounded-lg shadow-sm p-6 mb-6">
-              <h3 className="text-lg font-semibold text-gray-900 mb-4">
-                Feedback
-              </h3>
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-semibold text-gray-900">
+                  Feedback
+                </h3>
+                <button
+                  onClick={playFeedbackAudio}
+                  disabled={isPlayingFeedbackTTS}
+                  className={`px-4 py-2 rounded-lg text-white font-medium transition-colors ${
+                    isPlayingFeedbackTTS
+                      ? "bg-gray-400 cursor-not-allowed"
+                      : "bg-green-600 hover:bg-green-700"
+                  }`}
+                >
+                  {isPlayingFeedbackTTS ? "Playing..." : "🎵 Play Feedback"}
+                </button>
+              </div>
 
               <div className="mb-4">
                 <div className="flex items-center mb-2">

@@ -12,7 +12,8 @@ from app.models.schemas import (
     QuestionResponse, 
     AnswerSubmission,
     AnswerFeedback,
-    InterviewDomains
+    InterviewDomains,
+    FeedbackSpeechRequest
 )
 from app.models.database import get_db, InterviewSession, InterviewQuestion
 from app.services.llm import llm_service
@@ -352,6 +353,26 @@ async def get_question_audio(question_id: int, db: Session = Depends(get_db)):
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error generating audio: {str(e)}")
+
+@router.post("/feedback/speech")
+async def generate_feedback_speech(request: FeedbackSpeechRequest):
+    """Generate speech audio for feedback text"""
+    try:
+        # Generate speech for the feedback text
+        audio_data = await speech_service.text_to_speech(request.text)
+        
+        if not audio_data:
+            return {"error": "Text-to-speech service not available"}
+        
+        # Return audio as streaming response
+        return StreamingResponse(
+            io.BytesIO(audio_data),
+            media_type="audio/wav",
+            headers={"Content-Disposition": "attachment; filename=feedback_audio.wav"}
+        )
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error generating feedback audio: {str(e)}")
 
 @router.put("/sessions/{session_id}/complete")
 async def complete_session(session_id: int, db: Session = Depends(get_db)):

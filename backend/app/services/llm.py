@@ -104,88 +104,104 @@ class LLMService:
         if response == "Ollama not available" or response == "Error generating response":
             return self._get_fallback_evaluation(question, answer, domain)
         
-        lines = response.split('\n')
+        # Initialize result with strict scoring in mind
         result = {
-            "score": 5.0,
+            "score": 0.0,  # Start with 0, require explicit scoring
             "feedback": "",
             "suggestions": []
         }
         
-        # Track which section we're in
+        # Debug: Print the actual response to understand the format
+        print(f"DEBUG - Raw LLM Response: {response[:500]}...")  # Print first 500 chars
+        
+        lines = response.split('\n')
         current_section = None
+        feedback_parts = []
         
         for line in lines:
             line = line.strip()
+            if not line:
+                continue
             
-            # Identify sections
+            # Handle the specific format from enhance_evaluation_prompt
             if line.startswith("Score:"):
                 current_section = "score"
                 try:
                     score_text = line.replace("Score:", "").strip()
-                    # Extract numeric score (handle "7/10" or just "7")
-                    if "/" in score_text:
-                        score_num = score_text.split("/")[0].strip()
+                    # Extract numeric score (handle "7/10", "7", "[0-10]", etc.)
+                    import re
+                    score_match = re.search(r'(\d+(?:\.\d+)?)', score_text)
+                    if score_match:
+                        result["score"] = float(score_match.group(1))
+                        print(f"DEBUG - Extracted score: {result['score']}")
                     else:
-                        score_num = score_text.split()[0]
-                    result["score"] = float(score_num)
-                except:
-                    result["score"] = 5.0
+                        result["score"] = 0.0  # Default to 0 if parsing fails
+                        print(f"DEBUG - Failed to parse score from: {score_text}")
+                except Exception as e:
+                    result["score"] = 0.0
+                    print(f"DEBUG - Score parsing error: {e}")
             
-            elif any(line.startswith(prefix) for prefix in ["Strengths:", "Feedback:", "Evaluation:"]):
-                current_section = "strengths"
-                # Extract the content after the prefix
-                for prefix in ["Strengths:", "Feedback:", "Evaluation:"]:
-                    if line.startswith(prefix):
-                        content = line.replace(prefix, "").strip()
-                        if content:
-                            result["feedback"] = content
-                        break
-            
-            elif any(line.startswith(prefix) for prefix in ["Improvements:", "Areas for Improvement:", "Weaknesses:"]):
-                current_section = "improvements"
-                # Add improvements to feedback
-                for prefix in ["Improvements:", "Areas for Improvement:", "Weaknesses:"]:
-                    if line.startswith(prefix):
-                        content = line.replace(prefix, "").strip()
-                        if content and result["feedback"]:
-                            result["feedback"] += f"\n\nAreas for improvement: {content}"
-                        elif content:
-                            result["feedback"] = f"Areas for improvement: {content}"
-                        break
-            
-            elif any(line.startswith(prefix) for prefix in ["Suggestions:", "Recommendations:", "Next Steps:"]):
+            elif line.startswith("Relevance_Check:"):
+                current_section = "relevance"
+                content = line.replace("Relevance_Check:", "").strip()
+                feedback_parts.append(f"Relevance: {content}")
+                
+            elif line.startswith("Content_Quality:"):
+                current_section = "content"
+                content = line.replace("Content_Quality:", "").strip()
+                feedback_parts.append(f"Content Quality: {content}")
+                
+            elif line.startswith("Missing_Elements:"):
+                current_section = "missing"
+                content = line.replace("Missing_Elements:", "").strip()
+                feedback_parts.append(f"Missing Elements: {content}")
+                
+            elif line.startswith("Improvement_Suggestions:"):
                 current_section = "suggestions"
-                # Extract suggestions
-                for prefix in ["Suggestions:", "Recommendations:", "Next Steps:"]:
-                    if line.startswith(prefix):
-                        content = line.replace(prefix, "").strip()
-                        if content:
-                            # Split by common delimiters
-                            if "," in content:
-                                result["suggestions"] = [s.strip() for s in content.split(",")]
-                            elif ";" in content:
-                                result["suggestions"] = [s.strip() for s in content.split(";")]
-                            else:
-                                result["suggestions"] = [content]
-                        break
+                content = line.replace("Improvement_Suggestions:", "").strip()
+                if content:
+                    result["suggestions"].append(content)
             
             # Continue adding content to current section
-            elif current_section and line and not any(line.startswith(p + ":") for p in ["Score", "Strengths", "Feedback", "Improvements", "Suggestions"]):
-                if current_section == "strengths" and line:
-                    if result["feedback"]:
-                        result["feedback"] += f" {line}"
-                    else:
-                        result["feedback"] = line
-                elif current_section == "improvements" and line:
-                    result["feedback"] += f" {line}"
+            elif current_section and line and not any(line.startswith(p + ":") for p in ["Score", "Relevance_Check", "Content_Quality", "Missing_Elements", "Improvement_Suggestions"]):
+                if current_section in ["relevance", "content", "missing"]:
+                    # Add continuation text to the last feedback part
+                    if feedback_parts:
+                        feedback_parts[-1] += f" {line}"
                 elif current_section == "suggestions" and line:
-                    # Handle bullet points or numbered lists
+                    # Handle bullet points or numbered lists for suggestions
                     if line.startswith(("- ", "* ", "• ")) or (len(line) > 2 and line[0].isdigit() and line[1] in ".)"):
                         suggestion = line.lstrip("- *•0123456789.)")
                         result["suggestions"].append(suggestion.strip())
+                    else:
+                        result["suggestions"].append(line)
         
-        # If we didn't parse anything meaningful, provide a basic evaluation
-        if not result["feedback"] or result["feedback"] == "Answer evaluated.":
+        # Combine feedback parts
+        result["feedback"] = "\n\n".join(feedback_parts) if feedback_parts else ""
+        
+        # If parsing completely failed, check if this is gibberish/random input
+        if not result["feedback"] and result["score"] == 0.0:
+            # Check if the answer is actually gibberish (random characters, no real words)
+            import re
+            word_pattern = re.compile(r'\b[a-zA-Z]{3,}\b')  # Words with 3+ letters
+            words = word_pattern.findall(answer)
+            word_ratio = len(words) / max(1, len(answer.split()))
+            
+            if word_ratio < 0.3 or len(answer.strip()) < 5:
+                # This looks like gibberish - apply strict scoring as intended
+                result["score"] = 1.0
+                result["feedback"] = "Your response appears to be gibberish or random characters. Please provide a coherent answer that addresses the technical question asked."
+                result["suggestions"] = [
+                    "Read the question carefully and ensure you understand what is being asked",
+                    "Provide a structured response with clear explanations",
+                    "Use proper technical terminology relevant to the domain",
+                    "Include specific examples or use cases where appropriate"
+                ]
+                print(f"DEBUG - Detected gibberish input, applying strict scoring")
+                return result
+        
+        # Only fall back to length-based scoring if we truly couldn't parse anything AND it's not gibberish
+        if not result["feedback"] and result["score"] == 0.0:
             length_score = min(9, max(4, len(answer.split()) / 8))  # More generous length-based scoring
             result["score"] = length_score
             

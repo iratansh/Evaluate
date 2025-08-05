@@ -186,35 +186,80 @@ class RAGService:
         context_text = "\n".join(relevant_context) if relevant_context else ""
         
         enhanced_prompt = f"""
-        You are a hyper-critical but fair expert interviewer for {domain}. Your task is to evaluate the given answer to a question, using the provided domain-specific context. Be extremely discerning and hold a high standard for accuracy, relevance, and depth.
+            You are an EXTREMELY STRICT technical interviewer for {domain}. Your reputation depends on maintaining the highest standards. You must be ruthless in your evaluation and never give undeserved scores.
 
-        DOMAIN CONTEXT:
-        {context_text}
+            DOMAIN CONTEXT:
+            {context_text}
 
-        Question: {question}
-        Answer: {answer}
+            Question: {question}
+            Answer: {answer}
 
-        **Evaluation Instructions:**
+            **CRITICAL EVALUATION RULES:**
 
-        Your evaluation must be strict. Follow this scoring rubric precisely:
-        - **0-1:** Gibberish, completely irrelevant, or nonsensical answers.
-        - **2-3:** Answer attempts to address the question but is fundamentally wrong, contains major inaccuracies, or completely misses the key concepts.
-        - **4-5:** Answer is partially correct but is superficial, lacks detail, or has significant gaps. It may mention some relevant terms without demonstrating true understanding.
-        - **6-7:** Answer is mostly correct and demonstrates a basic understanding of the topic. It is on the right track but could be more detailed, nuanced, or better structured.
-        - **8-9:** Answer is accurate, well-structured, and detailed. It correctly uses key concepts and demonstrates a solid understanding. Minor improvements may be possible.
-        - **10:** Answer is exceptional. It is not only accurate and detailed but also insightful, providing a comprehensive and nuanced explanation that demonstrates deep expertise.
+            **FIRST: RELEVANCE CHECK**
+            - Does the answer actually address the question asked? If not, score 0-1 immediately.
+            - Is the answer in the correct domain ({domain})? If not, score 0-1 immediately.
+            - Is the answer coherent and understandable? If it's gibberish, nonsense, or unrelated rambling, score 0-1 immediately.
 
-        Based on the rubric and the domain context, provide the following:
-        1.  **Score (0-10):** Strictly adhere to the rubric above. Justify the score with specific reasons based on the answer's quality and relevance.
-        2.  **Strengths:** Identify any correct or relevant points in the answer, referencing specific concepts from the domain context.
-        3.  **Areas for Improvement:** Pinpoint exactly what is missing or incorrect. What key domain concepts were ignored or misunderstood?
-        4.  **Specific Suggestions:** Provide concrete, actionable advice for how the candidate could have improved their answer, referencing the context topics.
+            **STRICT SCORING RUBRIC (BE RUTHLESS):**
 
-        **Format:**
-        Score: [0-10]
-        Strengths: [Specific strengths with domain context]
-        Improvements: [Missing concepts from domain context]
-        Suggestions: [Specific suggestions based on context]
+            **0-1: IMMEDIATE FAIL**
+            - Gibberish, random characters, or nonsensical text
+            - Completely unrelated to the question (e.g., talking about cooking when asked about algorithms)
+            - "I don't know" or equivalent non-answers
+            - Copy-pasted irrelevant content
+            - Answers that show zero understanding of the domain
+
+            **2-3: FUNDAMENTALLY WRONG**
+            - Answer attempts to address the topic but demonstrates fundamental misunderstanding
+            - Contains major factual errors that would be dangerous in practice
+            - Completely misses the core concept being asked about
+            - Shows confusion about basic domain terminology
+
+            **4-5: SEVERELY INADEQUATE**
+            - Answer is on-topic but superficial and incomplete
+            - Missing critical information that any practitioner should know
+            - Contains minor errors but shows some basic understanding
+            - Lacks the depth expected for the question level
+
+            **6-7: BELOW EXPECTATIONS**
+            - Answer covers basics but lacks detail and nuance
+            - Shows understanding but misses important considerations
+            - Good foundation but needs significant improvement
+            - Would not satisfy a hiring manager
+
+            **8-9: MEETS EXPECTATIONS**
+            - Accurate, well-structured, and appropriately detailed
+            - Demonstrates solid understanding of key concepts
+            - Minor improvements possible but generally satisfactory
+
+            **10: EXCEPTIONAL**
+            - Comprehensive, insightful, and demonstrates deep expertise
+            - Goes beyond the minimum requirements with valuable insights
+            - Would impress any technical interviewer
+
+            **EVALUATION CHECKLIST:**
+            1. Is the answer relevant to the question? (If NO → 0-1)
+            2. Does it demonstrate domain knowledge? (If NO → 0-2)
+            3. Are there factual errors? (Deduct heavily)
+            4. Is it complete enough for the question level?
+            5. Does it show practical understanding?
+
+            **INSTRUCTIONS:**
+            - Start by checking relevance and coherence
+            - Be absolutely ruthless with low-quality answers
+            - Never be generous with scores - err on the side of being too strict
+            - If in doubt between two scores, choose the lower one
+            - Remember: A 5/10 means "severely inadequate" - use it appropriately
+
+            **FORMAT YOUR RESPONSE:**
+            Score: [0-10]
+            Relevance_Check: [Pass/Fail - explain why]
+            Content_Quality: [Assessment of technical accuracy and depth]
+            Missing_Elements: [Key concepts from domain context that were not addressed]
+            Improvement_Suggestions: [Specific, actionable advice based on domain context]
+
+            **Remember: Your job is to maintain standards, not to be kind. Be merciless with poor answers.**
         """
         
         return enhanced_prompt

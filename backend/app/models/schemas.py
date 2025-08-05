@@ -46,3 +46,6 @@ class InterviewDomains(BaseModel):
         "Hardware/ECE",
         "Robotics"
     ]
+
+class FeedbackSpeechRequest(BaseModel):
+    text: str
