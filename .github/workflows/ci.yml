@@ -116,10 +116,10 @@ jobs:
     
     - name: Test Docker Compose build
       run: |
-        docker-compose build --no-cache
-        docker-compose config
+        docker compose build --no-cache
+        docker compose config
     
     - name: Test production Docker build
       run: |
-        docker-compose -f docker-compose.prod.yml build --no-cache
-        docker-compose -f docker-compose.prod.yml config
+        docker compose -f docker-compose.prod.yml build --no-cache
+        docker compose -f docker-compose.prod.yml config
