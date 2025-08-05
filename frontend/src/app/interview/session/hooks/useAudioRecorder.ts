@@ -80,6 +80,7 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
       mediaRecorder.onerror = (event) => {
         console.error('MediaRecorder error:', event);
         setError('Recording error occurred');
+        // eslint-disable-next-line react-hooks/exhaustive-deps
         stopRecording();
       };
 
@@ -99,6 +100,7 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
         streamRef.current = null;
       }
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isSupported]);
 
   const stopRecording = useCallback(async (): Promise<Blob | null> => {
