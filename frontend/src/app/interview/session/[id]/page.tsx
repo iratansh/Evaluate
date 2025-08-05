@@ -56,7 +56,7 @@ export default function InterviewSession() {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  const startTimeRef = useRef<Date | null>(null);
+  // const startTimeRef = useRef<Date | null>(null);
   const sessionStartTimeRef = useRef<Date | null>(null);
   const initializationRef = useRef<boolean>(false);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
@@ -343,7 +343,7 @@ export default function InterviewSession() {
       );
 
       if (!response.ok) {
-        const errorData = await response.json();
+        // const errorData = await response.json();
         if (response.status === 410) {
           // Time expired
           await completeSessionAndRedirect(sessionId);
@@ -584,7 +584,7 @@ export default function InterviewSession() {
               </h3>
               <p className="text-gray-600 mb-4">
                 Your interview will automatically end in{" "}
-                {formatTime(timeRemaining)}. You'll be redirected to your
+                {formatTime(timeRemaining)}. You&apos;ll be redirected to your
                 results shortly.
               </p>
               <button

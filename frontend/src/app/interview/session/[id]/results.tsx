@@ -3,7 +3,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useRouter, useParams } from 'next/navigation';
+import { useParams } from 'next/navigation';
 import Link from 'next/link';
 
 interface SessionResult {
@@ -26,7 +26,7 @@ interface QuestionResult {
 }
 
 export default function InterviewResults() {
-  const router = useRouter();
+  // const router = useRouter();
   const params = useParams();
   const sessionId = params?.id as string;
   
