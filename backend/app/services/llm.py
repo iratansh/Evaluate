@@ -112,7 +112,7 @@ class LLMService:
         }
         
         # Debug: Print the actual response to understand the format
-        print(f"DEBUG - Raw LLM Response: {response[:500]}...")  # Print first 500 chars
+        print(f"DEBUG - Raw LLM Response: {response[:500]}...")  
         
         lines = response.split('\n')
         current_section = None

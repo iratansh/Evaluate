@@ -6,8 +6,6 @@ import httpx
 from app.config import settings
 
 try:
-    # Temporarily disable ChromaDB due to Python 3.8 compatibility issues
-    # import chromadb
     CHROMADB_AVAILABLE = False
 except ImportError:
     CHROMADB_AVAILABLE = False
@@ -19,7 +17,6 @@ class RAGService:
         self.client = httpx.AsyncClient(timeout=60.0)
         self.data_dir = Path("app/data")
         
-        # Use file-based knowledge base instead of ChromaDB for Python 3.8 compatibility
         self.knowledge_base = {}
         print("RAGService initialized with file-based knowledge base")
         

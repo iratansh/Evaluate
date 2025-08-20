@@ -13,7 +13,7 @@ async def health_check():
 
 @router.get("/ready")
 async def readiness_check():
-    # TODO: Add checks for dependencies (Ollama, Azure, the rest)
+    
     return {
         "status": "ready",
         "dependencies": {

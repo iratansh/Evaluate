@@ -179,7 +179,6 @@ class SpeechService:
         
         print(f"Converting audio to WAV format. Input format detected from first 10 bytes: {audio_data[:10]}")
         
-        # Try to use pydub for better format conversion
         try:
             from pydub import AudioSegment
             print("Using pydub for audio conversion")
@@ -210,8 +209,6 @@ class SpeechService:
         except ImportError:
             print("pydub not available, using fallback conversion")
         
-        # Fallback: Create a basic WAV file
-        # This might not work for all formats but will prevent crashes
         sample_rate = 16000
         bits_per_sample = 16
         num_channels = 1
