@@ -13,66 +13,62 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     
-    - name: Set up Python 3.11
-      uses: actions/setup-python@v4
+    - name: Set up Java 17
+      uses: actions/setup-java@v4
       with:
-        python-version: '3.11'
-    
-    - name: Cache pip dependencies
-      uses: actions/cache@v3
-      with:
-        path: ~/.cache/pip
-        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements*.txt') }}
-        restore-keys: |
-          ${{ runner.os }}-pip-
-    
-    - name: Install dependencies
-      run: |
-        cd backend
-        python -m pip install --upgrade pip
-        pip install -r requirements.txt
-        if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
-        if [ -f tests/requirements.txt ]; then pip install -r tests/requirements.txt; fi
+        java-version: '17'
+        distribution: 'temurin'
+        cache: 'maven'
     
     - name: Run backend tests
       run: |
         cd backend
-        python -m pytest tests/ -v --tb=short
+        chmod +x mvnw
+        ./mvnw test -B
     
     - name: Test API endpoints
       run: |
         cd backend
-        python -c "
-        import subprocess
-        import time
-        import requests
-        import sys
+        chmod +x mvnw
+        ./mvnw package -DskipTests -B -q
+        java -jar target/ai-interviewer-1.0.0.jar &
         
-        # Start the server in background
-        proc = subprocess.Popen(['python', '-m', 'uvicorn', 'app.main:app', '--host', '0.0.0.0', '--port', '8000'])
+        # Wait for Spring Boot to start
+        echo "Waiting for backend to start..."
+        for i in $(seq 1 30); do
+          if curl -s http://localhost:8000/health/ > /dev/null 2>&1; then
+            echo "Backend is up!"
+            break
+          fi
+          sleep 2
+        done
         
-        # Wait for server to start
-        time.sleep(5)
+        # Test health endpoint
+        STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/health/)
+        if [ "$STATUS" != "200" ]; then echo "✗ Health check failed ($STATUS)"; exit 1; fi
+        echo "✓ Health check passed"
         
-        try:
-            # Test health endpoint
-            response = requests.get('http://localhost:8000/health/')
-            assert response.status_code == 200, f'Health check failed: {response.status_code}'
-            print('✓ Health check passed')
-            
-            # Test root endpoint
-            response = requests.get('http://localhost:8000/')
-            assert response.status_code == 200, f'Root endpoint failed: {response.status_code}'
-            print('✓ Root endpoint passed')
-            
-            print('All API tests passed!')
-        except Exception as e:
-            print(f'API test failed: {e}')
-            sys.exit(1)
-        finally:
-            proc.terminate()
-            proc.wait()
-        "
+        # Test root endpoint
+        STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/)
+        if [ "$STATUS" != "200" ]; then echo "✗ Root endpoint failed ($STATUS)"; exit 1; fi
+        echo "✓ Root endpoint passed"
+        
+        # Test domains endpoint
+        STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/api/interview/domains)
+        if [ "$STATUS" != "200" ]; then echo "✗ Domains endpoint failed ($STATUS)"; exit 1; fi
+        echo "✓ Domains endpoint passed"
+        
+        # Test session creation
+        STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST http://localhost:8000/api/interview/sessions \
+          -H "Content-Type: application/json" \
+          -d '{"domain":"software_engineering","difficulty":"medium","duration_minutes":15}')
+        if [ "$STATUS" != "200" ]; then echo "✗ Session creation failed ($STATUS)"; exit 1; fi
+        echo "✓ Session creation passed"
+        
+        echo "All API tests passed!"
+        
+        # Stop the server
+        kill %1 2>/dev/null || true
 
   frontend-tests:
     runs-on: ubuntu-latest
