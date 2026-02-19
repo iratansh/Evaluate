@@ -26,6 +26,10 @@ echo ""
 echo "📦 Step 2: Installing frontend dependencies..."
 cd frontend && npm install && cd ..
 
+echo ""
+echo "📦 Building backend..."
+cd backend && ./mvnw dependency:resolve -B && cd ..
+
 # Step 3: Start development environment
 echo ""
 echo "🚀 Step 3: Starting development environment..."

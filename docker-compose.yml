@@ -5,16 +5,12 @@ services:
     build: ./backend
     ports:
       - "8000:8000"
-    volumes:
-      - ./backend:/app
-      - ./backend/app/data:/app/app/data
     environment:
-      - DATABASE_URL=sqlite:///./ai_interviewer.db
+      - SPRING_DATASOURCE_URL=jdbc:sqlite:./ai_interviewer.db
       - OLLAMA_BASE_URL=http://ollama:11434
       - OLLAMA_MODEL=llama3.2
     depends_on:
       - ollama
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
   frontend:
     build: ./frontend

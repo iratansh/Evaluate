@@ -1,0 +1,12 @@
+target/
+*.class
+*.jar
+*.db
+!.mvn/wrapper/maven-wrapper.jar
+.idea/
+*.iml
+.settings/
+.classpath
+.project
+data/audio/
+temp_audio_*

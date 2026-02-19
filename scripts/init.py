@@ -12,13 +12,11 @@ from pathlib import Path
 def create_directories():
     """Create necessary application directories"""
     directories = [
-        "backend/app/data/audio",
-        "backend/app/data/software_engineering",
-        "backend/app/data/data_science", 
-        "backend/app/data/ai_ml",
-        "backend/app/data/hardware_ece",
-        "backend/app/data/robotics",
-        "backend/chroma_db",
+        "backend/src/main/resources/data/software_engineering",
+        "backend/src/main/resources/data/data_science", 
+        "backend/src/main/resources/data/ai_ml",
+        "backend/src/main/resources/data/hardware_ece",
+        "backend/src/main/resources/data/robotics",
     ]
     
     for directory in directories:
@@ -27,20 +25,14 @@ def create_directories():
         print(f"✅ Created directory: {directory}")
 
 def check_environment():
-    """Check if environment file exists"""
-    env_file = Path("backend/.env")
-    if not env_file.exists():
-        print("📝 Creating .env file from template...")
-        example_file = Path("backend/.env.example")
-        if example_file.exists():
-            import shutil
-            shutil.copy(example_file, env_file)
-            print("✅ Created backend/.env")
-        else:
-            print("❌ backend/.env.example not found")
-            return False
+    """Check if Java is available"""
+    import shutil
+    java_available = shutil.which("java") is not None
+    if java_available:
+        print("✅ Java is available")
     else:
-        print("✅ backend/.env exists")
+        print("❌ Java not found. Please install JDK 17+.")
+        return False
     return True
 
 def main():

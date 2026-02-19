@@ -1,178 +1,189 @@
 # AI Interviewer
 
-A sophisticated AI-powered platform designed to help users practice for technical interviews with realistic, interactive experiences. The system features a virtual avatar, real-time feedback, speech-to-text capabilities, and personalized question generation across multiple technical domains.
+An AI-powered platform for practicing technical interviews with realistic, interactive experiences. Features a virtual avatar, real-time feedback, speech-to-text capabilities, and personalized question generation across multiple technical domains.
 
 ## Features
 
-### Core Functionality
-
-- **AI-Powered Question Generation**: Dynamic interview questions using Ollama LLM with domain-specific context
-- **Multi-Domain Support**: Software Engineering, Data Science, AI/ML, Hardware/ECE, and Robotics
-- **Speech Integration**: Full speech-to-text and text-to-speech capabilities using Azure Speech Services
-- **Interactive Avatar**: Professional animated avatar that speaks questions and provides feedback
-- **Real-time Scoring**: Intelligent evaluation with detailed feedback and improvement suggestions
-- **Timed Sessions**: Realistic interview timing with automatic session management
-
-### Advanced Features
-
-- **RAG-Enhanced Questions**: Retrieval-Augmented Generation for contextually relevant questions
-- **Audio Recording**: High-quality audio capture with WebM/WAV support and automatic conversion
-- **Comprehensive Feedback**: Detailed scoring (0-10), feedback analysis, and actionable suggestions
-- **Session Management**: Complete interview lifecycle from setup to results
-- **Responsive Design**: Modern, mobile-friendly interface built with Next.js and Tailwind CSS
-- **Containerized Deployment**: Full Docker support with development and production configurations
-
-## Architecture
-
-### Frontend (Next.js + TypeScript)
-
-- **Framework**: Next.js 14 with TypeScript
-- **UI**: Tailwind CSS with custom components
-- **Audio**: Custom `useAudioRecorder` hook with WebRTC integration
-- **State Management**: React hooks with optimized performance
-- **Animation**: Canvas-based avatar with audio visualization
-
-### Backend (FastAPI + Python)
-
-- **API**: FastAPI with async/await patterns
-- **Database**: SQLite with SQLAlchemy ORM
-- **AI/ML**: Ollama integration for local LLM inference
-- **Speech**: Azure Speech Services for STT/TTS
-- **Storage**: Local and Azure Blob Storage support
-- **Testing**: Comprehensive test suite with pytest
-
-### Infrastructure
-
-- **Containerization**: Docker & Docker Compose
-- **CI/CD**: GitHub Actions pipeline
-- **Development**: Hot reload for both frontend and backend
-- **Production**: Optimized builds with health checks
+- **AI-Powered Question Generation** — Dynamic questions using Ollama LLM with RAG-enhanced, domain-specific context
+- **Multi-Domain Support** — Software Engineering, Data Science, AI/ML, Hardware/ECE, and Robotics
+- **Speech Integration** — Text-to-speech and speech-to-text via Azure Speech Services
+- **Interactive Avatar** — Animated avatar that speaks questions and provides feedback
+- **Real-time Scoring** — Intelligent evaluation (0–10) with detailed feedback and improvement suggestions
+- **Timed Sessions** — Realistic interview timing with automatic session management
+- **Audio Recording** — High-quality audio capture with WebM/WAV support
+- **Containerized Deployment** — One-command startup with Docker Compose
 
 ## Tech Stack
 
-| Component            | Technology                                             |
-| -------------------- | ------------------------------------------------------ |
-| **Frontend**   | Next.js 14, React 18, TypeScript 5.3, Tailwind CSS 3.4 |
-| **Backend**    | FastAPI, Python 3.8+, SQLAlchemy, Pydantic             |
-| **AI/ML**      | Ollama (llama3.2), RAG with file-based knowledge base  |
-| **Speech**     | Azure Speech Services (STT/TTS)                        |
-| **Database**   | SQLite (development), PostgreSQL ready                 |
-| **Storage**    | Local filesystem, Azure Blob Storage                   |
-| **Testing**    | Pytest, Jest, GitHub Actions                           |
-| **Deployment** | Docker, Docker Compose                                 |
+| Component      | Technology                                                        |
+| -------------- | ----------------------------------------------------------------- |
+| **Frontend**   | Next.js 14, React 18, TypeScript 5.3, Tailwind CSS 3.4           |
+| **Backend**    | Java 17, Spring Boot 3.2, Spring Data JPA, Spring WebFlux        |
+| **AI/LLM**    | Ollama (llama3.2), RAG with file-based knowledge base             |
+| **Speech**     | Azure Speech Services (STT/TTS)                                  |
+| **Database**   | SQLite with Hibernate ORM                                         |
+| **Storage**    | Local filesystem, Azure Blob Storage                              |
+| **Build**      | Maven 3.9, npm                                                    |
+| **Deployment** | Docker, Docker Compose                                            |
 
-## Prerequisites
+## Quick Start
 
-- **Docker & Docker Compose** (recommended)
-- **Python 3.8+** (for manual backend setup)
-- **Node.js 18+** (for manual frontend setup)
-- **Ollama** (for LLM functionality)
-- **Azure Speech Services** (optional, for voice features)
+### Prerequisites
 
-### Environment Variables
+- [Docker & Docker Compose](https://docs.docker.com/get-docker/)
 
-#### Backend (.env)
+### Run with Docker (recommended)
 
-```env
-# Database
-DATABASE_URL=sqlite:///./ai_interviewer.db
+```bash
+# Clone the repository
+git clone https://github.com/iratansh/Evaluate.git
+cd Evaluate
 
-# Ollama Configuration
-OLLAMA_BASE_URL=http://localhost:11434
-OLLAMA_MODEL=llama3.2
+# Start all services (backend, frontend, ollama)
+docker compose up --build -d
 
-# Azure Speech Services (Optional)
-AZURE_SPEECH_KEY=your_speech_key
-AZURE_SPEECH_REGION=your_region
-AZURE_STORAGE_CONNECTION_STRING=your_storage_connection
+# Pull the LLM model (first time only, ~2 GB download)
+docker compose exec ollama ollama pull llama3.2
 ```
 
-#### Frontend (.env.local)
+Once running:
 
-```env
-NEXT_PUBLIC_API_URL=http://localhost:8000
+| Service      | URL                          |
+| ------------ | ---------------------------- |
+| **Frontend** | http://localhost:3000        |
+| **Backend**  | http://localhost:8000        |
+| **Ollama**   | http://localhost:11434       |
+
+### Run Locally (without Docker)
+
+Requires **Java 17+**, **Node.js 18+**, and [Ollama](https://ollama.com) installed locally.
+
+```bash
+# Start Ollama and pull the model
+ollama serve &
+ollama pull llama3.2
+
+# Start backend
+cd backend
+./mvnw spring-boot:run
+
+# In a separate terminal — start frontend
+cd frontend
+npm install
+npm run dev
+```
+
+### Using Make
+
+```bash
+make dev           # Start with Docker Compose
+make start-local   # Start without Docker (requires local Ollama)
+make test          # Run backend & frontend tests
+make logs          # Tail container logs
+make clean         # Tear down containers and clean builds
 ```
 
 ## Project Structure
 
 ```
-ai-interviewer/
-├── frontend/                  # Next.js frontend application
+Evaluate/
+├── backend/                        # Spring Boot backend
+│   ├── src/main/java/com/evaluate/aiinterviewer/
+│   │   ├── AiInterviewerApplication.java
+│   │   ├── config/                 # CORS, Jackson, WebClient config
+│   │   ├── controller/             # REST controllers
+│   │   ├── dto/                    # Request/response DTOs
+│   │   ├── model/                  # JPA entities
+│   │   ├── repository/             # Spring Data repositories
+│   │   └── service/                # Business logic (LLM, RAG, Speech, Storage)
+│   ├── src/main/resources/
+│   │   ├── application.properties
+│   │   └── data/                   # Domain topic knowledge base (Markdown)
+│   ├── src/test/                   # Test suite
+│   ├── Dockerfile
+│   └── pom.xml
+├── frontend/                       # Next.js frontend
 │   ├── src/
-│   │   ├── app/              # App router pages
-│   │   ├── components/       # Reusable UI components
-│   │   └── lib/              # Utility functions
-│   ├── public/               # Static assets
+│   │   ├── app/                    # App router pages
+│   │   │   ├── interview/
+│   │   │   │   ├── setup/          # Interview configuration page
+│   │   │   │   ├── session/[id]/   # Live interview session + avatar
+│   │   │   │   └── results/[id]/   # Post-interview results
+│   │   ├── components/             # Reusable UI components
+│   │   └── lib/                    # Utility functions
+│   ├── Dockerfile
 │   └── package.json
-├── backend/                   # FastAPI backend application
-│   ├── app/
-│   │   ├── api/              # API routes
-│   │   ├── models/           # Database models & schemas
-│   │   ├── services/         # Business logic (LLM, Speech, RAG)
-│   │   └── data/             # Knowledge base topics
-│   ├── tests/                # Test suite
-│   └── requirements.txt
-├── .github/workflows/        # CI/CD pipeline
-├── docker-compose.yml        # Development environment
-├── docker-compose.prod.yml   # Production environment
+├── docker-compose.yml              # Development environment
+├── docker-compose.prod.yml         # Production environment
+├── Makefile                        # Convenience commands
 └── README.md
 ```
 
-## CI/CD Pipeline
+## API Endpoints
 
-The project includes a comprehensive GitHub Actions pipeline that:
+| Endpoint                                    | Method | Description                      |
+| ------------------------------------------- | ------ | -------------------------------- |
+| `/`                                         | GET    | API status                       |
+| `/health/`                                  | GET    | Health check                     |
+| `/health/ready`                             | GET    | Readiness check (dependencies)   |
+| `/api/interview/domains`                    | GET    | List available interview domains |
+| `/api/interview/domains/{domain}/topics`    | GET    | Get topics for a domain          |
+| `/api/interview/sessions`                   | POST   | Create a new interview session   |
+| `/api/interview/sessions/{id}`              | GET    | Get session details              |
+| `/api/interview/sessions/{id}/complete`     | PUT    | Complete an interview session    |
+| `/api/interview/sessions/{id}/questions`    | GET    | Get all questions for a session  |
+| `/api/interview/questions`                  | POST   | Generate next question           |
+| `/api/interview/questions/{id}/answer`      | POST   | Submit a text answer             |
+| `/api/interview/questions/{id}/audio`       | POST   | Submit an audio answer           |
+| `/api/interview/questions/{id}/speech`      | GET    | Get question TTS audio           |
+| `/api/interview/feedback/speech`            | POST   | Get feedback TTS audio           |
 
-- Runs backend tests with pytest
-- Tests API endpoints with live server
-- Runs frontend linting and TypeScript checks
-- Validates Docker builds for development and production
+## Environment Variables
 
-### Key Endpoints
+All variables have sensible defaults for local development. Override as needed:
 
-| Endpoint                                 | Method | Description                     |
-| ---------------------------------------- | ------ | ------------------------------- |
-| `/api/interview/domains`               | GET    | Get available interview domains |
-| `/api/interview/sessions`              | POST   | Create new interview session    |
-| `/api/interview/questions`             | POST   | Generate next question          |
-| `/api/interview/questions/{id}/answer` | POST   | Submit text answer              |
-| `/api/interview/questions/{id}/audio`  | POST   | Submit audio answer             |
-| `/api/interview/questions/{id}/speech` | GET    | Get question TTS audio          |
-| `/api/interview/feedback/speech`       | POST   | Get feedback TTS audio          |
-
-## Usage
-
-1. **Start Session**: Choose domain (Software Engineering, Data Science, etc.) and difficulty
-2. **Answer Questions**: Respond via text input or voice recording
-3. **Receive Feedback**: Get real-time scoring and improvement suggestions
-4. **Complete Interview**: View comprehensive results and performance analysis
+| Variable                             | Default                      | Description                        |
+| ------------------------------------ | ---------------------------- | ---------------------------------- |
+| `OLLAMA_BASE_URL`                    | `http://localhost:11434`     | Ollama API endpoint                |
+| `OLLAMA_MODEL`                       | `llama3.2`                   | LLM model name                     |
+| `SPRING_DATASOURCE_URL`             | `jdbc:sqlite:./ai_interviewer.db` | Database JDBC URL             |
+| `AZURE_SPEECH_KEY`                   | *(empty)*                    | Azure Speech Services key          |
+| `AZURE_SPEECH_REGION`                | *(empty)*                    | Azure Speech Services region       |
+| `AZURE_STORAGE_CONNECTION_STRING`    | *(empty)*                    | Azure Blob Storage connection      |
+| `NEXT_PUBLIC_API_URL`                | `http://localhost:8000`      | Backend URL for the frontend       |
 
 ## Interview Domains
 
-- **Software Engineering**: System design, algorithms, data structures, architecture
-- **Data Science**: Statistics, machine learning, data analysis, visualization
-- **AI/ML**: Neural networks, deep learning, model evaluation, optimization
-- **Hardware/ECE**: Circuit design, digital systems, signal processing, embedded systems
-- **Robotics**: Control systems, kinematics, sensors, autonomous navigation
+| Domain                   | Topics                                                          |
+| ------------------------ | --------------------------------------------------------------- |
+| **Software Engineering** | System design, algorithms, data structures, architecture        |
+| **Data Science**         | Statistics, machine learning, data analysis, visualization      |
+| **AI/ML**                | Neural networks, deep learning, model evaluation, optimization  |
+| **Hardware/ECE**         | Circuit design, digital systems, signal processing, embedded    |
+| **Robotics**             | Control systems, kinematics, sensors, autonomous navigation     |
 
 ## Development
 
-### Adding New Domains
+### Running Tests
 
-1. Create topic file in `backend/app/data/{domain_name}/topics.md`
-2. Update domain list in `backend/app/api/interview.py`
-3. Add domain-specific keywords in `backend/app/services/llm.py`
+```bash
+# Backend (Spring Boot)
+cd backend && ./mvnw test
+
+# Frontend (Next.js)
+cd frontend && npm run test
+```
+
+### Adding a New Domain
+
+1. Create a topic file at `backend/src/main/resources/data/{domain_name}/topics.md`
+2. The `RagService` auto-discovers domains on startup — no code changes required
+3. Optionally add domain-specific keywords in `LlmService.java`
 
 ### Customizing the Avatar
 
-Modify the avatar rendering in `frontend/src/app/interview/session/[id]/avatar.tsx`
+Edit the canvas-based avatar in `frontend/src/app/interview/session/[id]/avatar.tsx`
 
-### Extending Speech Features
+---
 
-Configure additional Azure Speech Services features in `backend/app/services/speech.py`
-
-## Environment-Specific Configurations
-
-- **Development**: Hot reload, debug logging, development APIs
-- **Production**: Optimized builds, health checks, security headers--
-
-**Built using modern web technologies for the next generation of interview preparation.**
+**Built with Java, Spring Boot, Next.js, and Ollama for the next generation of interview preparation.**

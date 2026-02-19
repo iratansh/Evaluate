@@ -32,6 +32,11 @@ echo "📦 Installing frontend dependencies..."
 cd frontend && npm install
 cd ..
 
+# Build backend
+echo "📦 Building backend (Java/Spring Boot)..."
+cd backend && ./mvnw dependency:resolve -B
+cd ..
+
 echo ""
 echo "🎉 Setup complete!"
 echo ""
