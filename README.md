@@ -21,7 +21,7 @@ An AI-powered platform for practicing technical interviews with realistic, inter
 | **Backend**    | Java 17, Spring Boot 3.2, Spring Data JPA, Spring WebFlux        |
 | **AI/LLM**    | Ollama (llama3.2), RAG with file-based knowledge base             |
 | **Speech**     | Azure Speech Services (STT/TTS)                                  |
-| **Database**   | SQLite with Hibernate ORM                                         |
+| **Database**   | PostgreSQL with Hibernate ORM                                         |
 | **Storage**    | Local filesystem, Azure Blob Storage                              |
 | **Build**      | Maven 3.9, npm                                                    |
 | **Deployment** | Docker, Docker Compose                                            |
